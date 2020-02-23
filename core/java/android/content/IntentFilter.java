@@ -18,7 +18,9 @@ package android.content;
 
 import android.annotation.IntDef;
 import android.annotation.SystemApi;
+import android.annotation.UnsupportedAppUsage;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.os.PatternMatcher;
@@ -58,9 +60,7 @@ import java.util.Set;
  * multiple possible matching values (via {@link #addAction},
  * {@link #addDataType}, {@link #addDataScheme}, {@link #addDataSchemeSpecificPart},
  * {@link #addDataAuthority}, {@link #addDataPath}, and {@link #addCategory}, respectively).
- * For actions, the field
- * will not be tested if no values have been given (treating it as a wildcard);
- * if no data characteristics are specified, however, then the filter will
+ * For actions, if no data characteristics are specified, then the filter will
  * only match intents that contain no data.
  *
  * <p>The data characteristic is
@@ -123,7 +123,7 @@ import java.util.Set;
  *
  * <p><strong>Data Authority</strong> matches if any of the given values match
  * the Intent's data authority <em>and</em> one of the data schemes in the filter
- * has matched the Intent, <em>or</em> no authories were supplied in the filter.
+ * has matched the Intent, <em>or</em> no authorities were supplied in the filter.
  * The Intent authority is determined by calling
  * {@link Intent#getData} and {@link android.net.Uri#getAuthority} on that URI.
  * <em>Note that authority matching here is <b>case sensitive</b>, unlike
@@ -271,7 +271,9 @@ public class IntentFilter implements Parcelable {
     public static final String SCHEME_HTTPS = "https";
 
     private int mPriority;
+    @UnsupportedAppUsage
     private int mOrder;
+    @UnsupportedAppUsage
     private final ArrayList<String> mActions;
     private ArrayList<String> mCategories = null;
     private ArrayList<String> mDataSchemes = null;
@@ -536,6 +538,7 @@ public class IntentFilter implements Parcelable {
      *
      * @hide
      */
+    @UnsupportedAppUsage
     public final void setAutoVerify(boolean autoVerify) {
         mVerifyState &= ~STATE_VERIFY_AUTO;
         if (autoVerify) mVerifyState |= STATE_VERIFY_AUTO;
@@ -651,6 +654,7 @@ public class IntentFilter implements Parcelable {
      *
      * @hide
      */
+    @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.P, trackingBug = 115609023)
     public final boolean isVerified() {
         if ((mVerifyState & STATE_NEED_VERIFY_CHECKED) == STATE_NEED_VERIFY_CHECKED) {
             return ((mVerifyState & STATE_NEED_VERIFY) == STATE_NEED_VERIFY);
@@ -806,6 +810,7 @@ public class IntentFilter implements Parcelable {
     }
 
     /** @hide */
+    @UnsupportedAppUsage
     public final boolean hasExactDataType(String type) {
         return mDataTypes != null && mDataTypes.contains(type);
     }
@@ -1071,6 +1076,7 @@ public class IntentFilter implements Parcelable {
     }
 
     /** @hide */
+    @UnsupportedAppUsage
     public final boolean hasDataSchemeSpecificPart(PatternMatcher ssp) {
         if (mDataSchemeSpecificParts == null) {
             return false;
@@ -1154,6 +1160,7 @@ public class IntentFilter implements Parcelable {
     }
 
     /** @hide */
+    @UnsupportedAppUsage
     public final boolean hasDataAuthority(AuthorityEntry auth) {
         if (mDataAuthorities == null) {
             return false;
@@ -1250,6 +1257,7 @@ public class IntentFilter implements Parcelable {
     }
 
     /** @hide */
+    @UnsupportedAppUsage
     public final boolean hasDataPath(PatternMatcher path) {
         if (mDataPaths == null) {
             return false;
@@ -1886,7 +1894,7 @@ public class IntentFilter implements Parcelable {
         }
     }
 
-    public static final Parcelable.Creator<IntentFilter> CREATOR
+    public static final @android.annotation.NonNull Parcelable.Creator<IntentFilter> CREATOR
             = new Parcelable.Creator<IntentFilter>() {
         public IntentFilter createFromParcel(Parcel source) {
             return new IntentFilter(source);

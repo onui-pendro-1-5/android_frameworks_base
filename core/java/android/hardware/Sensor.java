@@ -18,6 +18,7 @@
 package android.hardware;
 
 import android.annotation.SystemApi;
+import android.annotation.UnsupportedAppUsage;
 import android.os.Build;
 
 /**
@@ -338,6 +339,8 @@ public final class Sensor {
      * for {@link #TYPE_STEP_COUNTER} instead. It is defined as a
      * {@link Sensor#REPORTING_MODE_SPECIAL_TRIGGER} sensor.
      * <p>
+     * This sensor requires permission {@code android.permission.ACTIVITY_RECOGNITION}.
+     * <p>
      * See {@link android.hardware.SensorEvent#values SensorEvent.values} for more details.
      */
     public static final int TYPE_STEP_DETECTOR = 18;
@@ -362,6 +365,8 @@ public final class Sensor {
      * is awake. Application needs to stay registered for this sensor because step counter does not
      * count steps if it is not activated. This sensor is ideal for fitness tracking applications.
      * It is defined as an {@link Sensor#REPORTING_MODE_ON_CHANGE} sensor.
+     * <p>
+     * This sensor requires permission {@code android.permission.ACTIVITY_RECOGNITION}.
      * <p>
      * See {@link android.hardware.SensorEvent#values SensorEvent.values} for more details.
      */
@@ -504,6 +509,7 @@ public final class Sensor {
      *
      * @hide Expected to be used internally for always on display.
      */
+    @UnsupportedAppUsage
     public static final int TYPE_PICK_UP_GESTURE = 25;
 
     /**
@@ -543,6 +549,7 @@ public final class Sensor {
      * @hide Expected to be used internally for auto-rotate and speaker rotation.
      *
      */
+    @UnsupportedAppUsage
     public static final int TYPE_DEVICE_ORIENTATION = 27;
 
     /**
@@ -891,6 +898,7 @@ public final class Sensor {
     private String  mStringType;
     private String  mRequiredPermission;
     private int     mMaxDelay;
+    @UnsupportedAppUsage
     private int     mFlags;
     private int     mId;
 
@@ -1014,6 +1022,7 @@ public final class Sensor {
     }
 
     /** @hide */
+    @UnsupportedAppUsage
     public int getHandle() {
         return mHandle;
     }

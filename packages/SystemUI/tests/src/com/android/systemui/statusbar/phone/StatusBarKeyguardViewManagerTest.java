@@ -19,22 +19,32 @@ package com.android.systemui.statusbar.phone;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.content.Context;
-import android.support.test.filters.SmallTest;
 import android.testing.AndroidTestingRunner;
 import android.testing.TestableLooper;
+import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewPropertyAnimator;
+
+import androidx.test.filters.SmallTest;
 
 import com.android.internal.widget.LockPatternUtils;
-import com.android.keyguard.KeyguardHostView;
 import com.android.keyguard.ViewMediatorCallback;
 import com.android.systemui.SysuiTestCase;
+import com.android.systemui.classifier.FalsingManagerFake;
 import com.android.systemui.keyguard.DismissCallbackRegistry;
+import com.android.systemui.plugins.ActivityStarter.OnDismissAction;
+import com.android.systemui.plugins.FalsingManager;
+import com.android.systemui.plugins.statusbar.StatusBarStateController;
+import com.android.systemui.statusbar.SysuiStatusBarStateController;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -60,25 +70,39 @@ public class StatusBarKeyguardViewManagerTest extends SysuiTestCase {
     @Mock
     private NotificationPanelView mNotificationPanelView;
     @Mock
-    private FingerprintUnlockController mFingerprintUnlockController;
+    private BiometricUnlockController mBiometrucUnlockController;
     @Mock
     private DismissCallbackRegistry mDismissCallbackRegistry;
+    @Mock
+    private ViewGroup mLockIconContainer;
+    @Mock
+    private SysuiStatusBarStateController mStatusBarStateController;
+    @Mock
+    private View mNotificationContainer;
+    @Mock
+    private KeyguardBypassController mBypassController;
     private StatusBarKeyguardViewManager mStatusBarKeyguardViewManager;
 
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
-        mDependency.injectMockDependency(StatusBarWindowManager.class);
+        mDependency.injectMockDependency(StatusBarWindowController.class);
+        mDependency.injectTestDependency(StatusBarStateController.class, mStatusBarStateController);
+        when(mLockIconContainer.getParent()).thenReturn(mock(ViewGroup.class));
+        when(mLockIconContainer.animate()).thenReturn(mock(ViewPropertyAnimator.class,
+                RETURNS_DEEP_STUBS));
         mStatusBarKeyguardViewManager = new TestableStatusBarKeyguardViewManager(getContext(),
                 mViewMediatorCallback, mLockPatternUtils);
         mStatusBarKeyguardViewManager.registerStatusBar(mStatusBar, mContainer,
-                mNotificationPanelView, mFingerprintUnlockController, mDismissCallbackRegistry);
+                mNotificationPanelView, mBiometrucUnlockController, mDismissCallbackRegistry,
+                mLockIconContainer, mNotificationContainer, mBypassController,
+                new FalsingManagerFake());
         mStatusBarKeyguardViewManager.show(null);
     }
 
     @Test
     public void dismissWithAction_AfterKeyguardGoneSetToFalse() {
-        KeyguardHostView.OnDismissAction action = () -> false;
+        OnDismissAction action = () -> false;
         Runnable cancelAction = () -> {};
         mStatusBarKeyguardViewManager.dismissWithAction(action, cancelAction,
                 false /* afterKeyguardGone */);
@@ -119,7 +143,8 @@ public class StatusBarKeyguardViewManagerTest extends SysuiTestCase {
 
     @Test
     public void onPanelExpansionChanged_neverHidesScrimmedBouncer() {
-        when(mBouncer.isShowingScrimmed()).thenReturn(true);
+        when(mBouncer.isShowing()).thenReturn(true);
+        when(mBouncer.isScrimmed()).thenReturn(true);
         mStatusBarKeyguardViewManager.onPanelExpansionChanged(0.5f /* expansion */,
                 true /* tracking */);
         verify(mBouncer).setExpansion(eq(KeyguardBouncer.EXPANSION_VISIBLE));
@@ -170,8 +195,8 @@ public class StatusBarKeyguardViewManagerTest extends SysuiTestCase {
 
     @Test
     public void onPanelExpansionChanged_neverTranslatesBouncerWhenWakeAndUnlock() {
-        when(mFingerprintUnlockController.getMode())
-                .thenReturn(FingerprintUnlockController.MODE_WAKE_AND_UNLOCK);
+        when(mBiometrucUnlockController.getMode())
+                .thenReturn(BiometricUnlockController.MODE_WAKE_AND_UNLOCK);
         mStatusBarKeyguardViewManager.onPanelExpansionChanged(KeyguardBouncer.EXPANSION_VISIBLE,
                 false /* tracking */);
         verify(mBouncer, never()).setExpansion(anyFloat());
@@ -185,6 +210,42 @@ public class StatusBarKeyguardViewManagerTest extends SysuiTestCase {
         verify(mBouncer, never()).setExpansion(anyFloat());
     }
 
+    @Test
+    public void setOccluded_animatesPanelExpansion_onlyIfBouncerHidden() {
+        mStatusBarKeyguardViewManager.setOccluded(false /* occluded */, true /* animated */);
+        verify(mStatusBar).animateKeyguardUnoccluding();
+
+        when(mBouncer.isShowing()).thenReturn(true);
+        clearInvocations(mStatusBar);
+        mStatusBarKeyguardViewManager.setOccluded(false /* occluded */, true /* animated */);
+        verify(mStatusBar, never()).animateKeyguardUnoccluding();
+    }
+
+    @Test
+    public void testHiding_cancelsGoneRunnable() {
+        OnDismissAction action = mock(OnDismissAction.class);
+        Runnable cancelAction = mock(Runnable.class);
+        mStatusBarKeyguardViewManager.dismissWithAction(action, cancelAction,
+                true /* afterKeyguardGone */);
+
+        mStatusBarKeyguardViewManager.hideBouncer(true);
+        mStatusBarKeyguardViewManager.hide(0, 30);
+        verify(action, never()).onDismiss();
+        verify(cancelAction).run();
+    }
+
+    @Test
+    public void testHiding_doesntCancelWhenShowing() {
+        OnDismissAction action = mock(OnDismissAction.class);
+        Runnable cancelAction = mock(Runnable.class);
+        mStatusBarKeyguardViewManager.dismissWithAction(action, cancelAction,
+                true /* afterKeyguardGone */);
+
+        mStatusBarKeyguardViewManager.hide(0, 30);
+        verify(action).onDismiss();
+        verify(cancelAction, never()).run();
+    }
+
     private class TestableStatusBarKeyguardViewManager extends StatusBarKeyguardViewManager {
 
         public TestableStatusBarKeyguardViewManager(Context context,
@@ -196,10 +257,13 @@ public class StatusBarKeyguardViewManagerTest extends SysuiTestCase {
         @Override
         public void registerStatusBar(StatusBar statusBar, ViewGroup container,
                 NotificationPanelView notificationPanelView,
-                FingerprintUnlockController fingerprintUnlockController,
-                DismissCallbackRegistry dismissCallbackRegistry) {
+                BiometricUnlockController fingerprintUnlockController,
+                DismissCallbackRegistry dismissCallbackRegistry,
+                ViewGroup lockIconContainer, View notificationContainer,
+                KeyguardBypassController bypassController, FalsingManager falsingManager) {
             super.registerStatusBar(statusBar, container, notificationPanelView,
-                    fingerprintUnlockController, dismissCallbackRegistry);
+                    fingerprintUnlockController, dismissCallbackRegistry, lockIconContainer,
+                    notificationContainer, bypassController, falsingManager);
             mBouncer = StatusBarKeyguardViewManagerTest.this.mBouncer;
         }
     }

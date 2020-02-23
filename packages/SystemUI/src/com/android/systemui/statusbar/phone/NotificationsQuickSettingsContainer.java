@@ -20,7 +20,6 @@ import android.app.Fragment;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Canvas;
-import android.support.annotation.DimenRes;
 import android.util.AttributeSet;
 import android.view.View;
 import android.view.ViewStub;
@@ -28,14 +27,17 @@ import android.view.ViewStub.OnInflateListener;
 import android.view.WindowInsets;
 import android.widget.FrameLayout;
 
+import androidx.annotation.DimenRes;
+
 import com.android.systemui.R;
-import com.android.systemui.SysUiServiceProvider;
 import com.android.systemui.fragments.FragmentHostManager;
 import com.android.systemui.fragments.FragmentHostManager.FragmentListener;
 import com.android.systemui.plugins.qs.QS;
-import com.android.systemui.statusbar.NotificationData.Entry;
 import com.android.systemui.statusbar.notification.AboveShelfObserver;
-import com.android.systemui.statusbar.stack.NotificationStackScrollLayout;
+import com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout;
+
+import java.util.ArrayList;
+import java.util.Comparator;
 
 /**
  * The container with notification stack scroller and quick settings inside.
@@ -55,6 +57,9 @@ public class NotificationsQuickSettingsContainer extends FrameLayout
     private int mBottomPadding;
     private int mStackScrollerMargin;
     private boolean mHasViewsAboveShelf;
+    private ArrayList<View> mDrawingOrderedChildren = new ArrayList<>();
+    private ArrayList<View> mLayoutDrawingOrder = new ArrayList<>();
+    private final Comparator<View> mIndexComparator = Comparator.comparingInt(this::indexOfChild);
 
     public NotificationsQuickSettingsContainer(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -108,35 +113,44 @@ public class NotificationsQuickSettingsContainer extends FrameLayout
     }
 
     @Override
-    protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
-        boolean userSwitcherVisible = mInflated && mUserSwitcher.getVisibility() == View.VISIBLE;
-        boolean statusBarVisible = mKeyguardStatusBar.getVisibility() == View.VISIBLE;
-
-        final boolean qsBottom = mHasViewsAboveShelf;
-        View stackQsTop = qsBottom ? mStackScroller : mQsFrame;
-        View stackQsBottom = !qsBottom ? mStackScroller : mQsFrame;
+    protected void dispatchDraw(Canvas canvas) {
         // Invert the order of the scroll view and user switcher such that the notifications receive
         // touches first but the panel gets drawn above.
-        if (child == mQsFrame) {
-            return super.drawChild(canvas, userSwitcherVisible && statusBarVisible ? mUserSwitcher
-                    : statusBarVisible ? mKeyguardStatusBar
-                    : userSwitcherVisible ? mUserSwitcher
-                    : stackQsBottom, drawingTime);
-        } else if (child == mStackScroller) {
-            return super.drawChild(canvas,
-                    userSwitcherVisible && statusBarVisible ? mKeyguardStatusBar
-                    : statusBarVisible || userSwitcherVisible ? stackQsBottom
-                    : stackQsTop,
-                    drawingTime);
-        } else if (child == mUserSwitcher) {
-            return super.drawChild(canvas,
-                    userSwitcherVisible && statusBarVisible ? stackQsBottom
-                    : stackQsTop,
-                    drawingTime);
-        } else if (child == mKeyguardStatusBar) {
-            return super.drawChild(canvas,
-                    stackQsTop,
-                    drawingTime);
+        mDrawingOrderedChildren.clear();
+        mLayoutDrawingOrder.clear();
+        if (mInflated && mUserSwitcher.getVisibility() == View.VISIBLE) {
+            mDrawingOrderedChildren.add(mUserSwitcher);
+            mLayoutDrawingOrder.add(mUserSwitcher);
+        }
+        if (mKeyguardStatusBar.getVisibility() == View.VISIBLE) {
+            mDrawingOrderedChildren.add(mKeyguardStatusBar);
+            mLayoutDrawingOrder.add(mKeyguardStatusBar);
+        }
+        if (mStackScroller.getVisibility() == View.VISIBLE) {
+            mDrawingOrderedChildren.add(mStackScroller);
+            mLayoutDrawingOrder.add(mStackScroller);
+        }
+        if (mQsFrame.getVisibility() == View.VISIBLE) {
+            mDrawingOrderedChildren.add(mQsFrame);
+            mLayoutDrawingOrder.add(mQsFrame);
+        }
+
+        if (mHasViewsAboveShelf) {
+            // StackScroller needs to be on top
+            mDrawingOrderedChildren.remove(mStackScroller);
+            mDrawingOrderedChildren.add(mStackScroller);
+        }
+
+        // Let's now find the order that the view has when drawing regulary by sorting
+        mLayoutDrawingOrder.sort(mIndexComparator);
+        super.dispatchDraw(canvas);
+    }
+
+    @Override
+    protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
+        int layoutIndex = mLayoutDrawingOrder.indexOf(child);
+        if (layoutIndex >= 0) {
+            return super.drawChild(canvas, mDrawingOrderedChildren.get(layoutIndex), drawingTime);
         } else {
             return super.drawChild(canvas, child, drawingTime);
         }

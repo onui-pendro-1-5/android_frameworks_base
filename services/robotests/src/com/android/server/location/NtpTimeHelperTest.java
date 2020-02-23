@@ -3,24 +3,23 @@ package com.android.server.location;
 import static com.google.common.truth.Truth.assertThat;
 
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 
 import android.os.Looper;
+import android.os.SystemClock;
 import android.platform.test.annotations.Presubmit;
 import android.util.NtpTrustedTime;
 
 import com.android.server.location.NtpTimeHelper.InjectNtpTimeCallback;
-import com.android.server.testing.FrameworkRobolectricTestRunner;
-import com.android.server.testing.SystemLoaderPackages;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
-import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowLooper;
-import org.robolectric.shadows.ShadowSystemClock;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -28,12 +27,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * Unit tests for {@link NtpTimeHelper}.
  */
-@RunWith(FrameworkRobolectricTestRunner.class)
-@Config(
-        manifest = Config.NONE,
-        sdk = 27
-)
-@SystemLoaderPackages({"com.android.server.location"})
+@RunWith(RobolectricTestRunner.class)
 @Presubmit
 public class NtpTimeHelperTest {
 
@@ -59,8 +53,10 @@ public class NtpTimeHelperTest {
 
     @Test
     public void handleInjectNtpTime_cachedAgeLow_injectTime() throws InterruptedException {
-        doReturn(NtpTimeHelper.NTP_INTERVAL - 1).when(mMockNtpTrustedTime).getCacheAge();
-        doReturn(MOCK_NTP_TIME).when(mMockNtpTrustedTime).getCachedNtpTime();
+        NtpTrustedTime.TimeResult result = mock(NtpTrustedTime.TimeResult.class);
+        doReturn(NtpTimeHelper.NTP_INTERVAL - 1).when(result).getAgeMillis();
+        doReturn(MOCK_NTP_TIME).when(result).getTimeMillis();
+        doReturn(result).when(mMockNtpTrustedTime).getCachedTimeResult();
 
         mNtpTimeHelper.retrieveAndInjectNtpTime();
 
@@ -71,7 +67,9 @@ public class NtpTimeHelperTest {
     @Test
     public void handleInjectNtpTime_injectTimeFailed_injectTimeDelayed()
             throws InterruptedException {
-        doReturn(NtpTimeHelper.NTP_INTERVAL + 1).when(mMockNtpTrustedTime).getCacheAge();
+        NtpTrustedTime.TimeResult result1 = mock(NtpTrustedTime.TimeResult.class);
+        doReturn(NtpTimeHelper.NTP_INTERVAL + 1).when(result1).getAgeMillis();
+        doReturn(result1).when(mMockNtpTrustedTime).getCachedTimeResult();
         doReturn(false).when(mMockNtpTrustedTime).forceRefresh();
 
         mNtpTimeHelper.retrieveAndInjectNtpTime();
@@ -79,9 +77,11 @@ public class NtpTimeHelperTest {
         assertThat(mCountDownLatch.await(2, TimeUnit.SECONDS)).isFalse();
 
         doReturn(true).when(mMockNtpTrustedTime).forceRefresh();
-        doReturn(1L).when(mMockNtpTrustedTime).getCacheAge();
-        doReturn(MOCK_NTP_TIME).when(mMockNtpTrustedTime).getCachedNtpTime();
-        ShadowSystemClock.sleep(NtpTimeHelper.RETRY_INTERVAL);
+        NtpTrustedTime.TimeResult result2 = mock(NtpTrustedTime.TimeResult.class);
+        doReturn(1L).when(result2).getAgeMillis();
+        doReturn(MOCK_NTP_TIME).when(result2).getTimeMillis();
+        doReturn(result2).when(mMockNtpTrustedTime).getCachedTimeResult();
+        SystemClock.sleep(NtpTimeHelper.RETRY_INTERVAL);
 
         waitForTasksToBePostedOnHandlerAndRunThem();
         assertThat(mCountDownLatch.await(2, TimeUnit.SECONDS)).isTrue();

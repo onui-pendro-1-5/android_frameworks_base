@@ -17,7 +17,6 @@
 package android.security.keystore;
 
 import android.security.Credentials;
-import android.security.GateKeeper;
 import android.security.KeyStore;
 import android.security.keymaster.KeyCharacteristics;
 import android.security.keymaster.KeymasterArguments;
@@ -204,11 +203,20 @@ public abstract class AndroidKeyStoreKeyGeneratorSpi extends KeyGeneratorSpi {
                         }
                     }
                 }
-
+                if (mKeymasterAlgorithm == KeymasterDefs.KM_ALGORITHM_3DES) {
+                    if (mKeySizeBits != 168) {
+                        throw new InvalidAlgorithmParameterException(
+                            "3DES key size must be 168 bits.");
+                    }
+                }
                 if (mKeymasterAlgorithm == KeymasterDefs.KM_ALGORITHM_HMAC) {
                     if (mKeySizeBits < 64) {
                         throw new InvalidAlgorithmParameterException(
                             "HMAC key size must be at least 64 bits.");
+                    }
+                    if (mKeySizeBits > 512 && spec.isStrongBoxBacked()) {
+                        throw new InvalidAlgorithmParameterException(
+                            "StrongBox HMAC key size must be smaller than 512 bits.");
                     }
 
                     // JCA HMAC key algorithm implies a digest (e.g., HmacSHA256 key algorithm

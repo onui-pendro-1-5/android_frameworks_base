@@ -15,6 +15,7 @@
  */
 package com.android.server.camera;
 
+import android.annotation.IntDef;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -32,6 +33,7 @@ import android.os.Process;
 import android.os.RemoteException;
 import android.os.SystemClock;
 import android.os.SystemProperties;
+import android.os.UserHandle;
 import android.os.UserManager;
 import android.util.ArrayMap;
 import android.util.ArraySet;
@@ -42,7 +44,10 @@ import com.android.internal.logging.nano.MetricsProto.MetricsEvent;
 import com.android.server.LocalServices;
 import com.android.server.ServiceThread;
 import com.android.server.SystemService;
+import com.android.server.wm.WindowManagerInternal;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -50,7 +55,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * CameraServiceProxy is the system_server analog to the camera service running in mediaserver.
+ * CameraServiceProxy is the system_server analog to the camera service running in cameraserver.
  *
  * @hide
  */
@@ -72,8 +77,12 @@ public class CameraServiceProxy extends SystemService
 
     // Handler message codes
     private static final int MSG_SWITCH_USER = 1;
+    private static final int MSG_CAMERA_CLOSED = 1001;
+    private static final int MSG_CAMERA_OPEN = 1002;
 
     private static final int RETRY_DELAY_TIME = 20; //ms
+    private static final int RETRY_TIMES = 30;
+    private static final int CAMERA_EVENT_DELAY_TIME = 70; //ms
 
     // Maximum entries to keep in usage history before dumping out
     private static final int MAX_USAGE_HISTORY = 100;
@@ -89,15 +98,40 @@ public class CameraServiceProxy extends SystemService
 
     private ICameraService mCameraServiceRaw;
 
+    // Map of currently active camera IDs
     private final ArrayMap<String, CameraUsageEvent> mActiveCameraUsage = new ArrayMap<>();
     private final List<CameraUsageEvent> mCameraUsageHistory = new ArrayList<>();
+
     private final MetricsLogger mLogger = new MetricsLogger();
     private static final String NFC_NOTIFICATION_PROP = "ro.camera.notify_nfc";
     private static final String NFC_SERVICE_BINDER_NAME = "nfc";
     private static final IBinder nfcInterfaceToken = new Binder();
 
-    private final boolean mNotifyNfc;
+    // Valid values for NFC_NOTIFICATION_PROP
+    // Do not disable active NFC for any camera use
+    private static final int NFC_NOTIFY_NONE = 0;
+    // Always disable active NFC for any camera use
+    private static final int NFC_NOTIFY_ALL = 1;
+     // Disable active NFC only for back-facing cameras
+    private static final int NFC_NOTIFY_BACK = 2;
+    // Disable active NFC only for front-facing cameras
+    private static final int NFC_NOTIFY_FRONT = 3;
+
+    @Retention(RetentionPolicy.SOURCE)
+    @IntDef(prefix = {"NFC_"}, value =
+         {NFC_NOTIFY_NONE,
+          NFC_NOTIFY_ALL,
+          NFC_NOTIFY_BACK,
+          NFC_NOTIFY_FRONT})
+    private @interface NfcNotifyState {};
+
+    private final @NfcNotifyState int mNotifyNfc;
+    private boolean mLastNfcPollState = true;
     private final boolean mAllowMediaUid;
+    private final boolean mSendCameraStatusIntent;
+
+    private long mClosedEvent;
+    private long mOpenEvent;
 
     /**
      * Structure to track camera usage
@@ -173,7 +207,7 @@ public class CameraServiceProxy extends SystemService
                         " camera service UID!");
                 return;
             }
-            notifySwitchWithRetries(30);
+            notifySwitchWithRetries(RETRY_TIMES);
         }
 
         @Override
@@ -191,6 +225,25 @@ public class CameraServiceProxy extends SystemService
                     state + " for client " + clientName + " API Level " + apiLevel);
 
             updateActivityCount(cameraId, newCameraState, facing, clientName, apiLevel);
+
+            if (mSendCameraStatusIntent && facing == ICameraServiceProxy.CAMERA_FACING_FRONT) {
+                switch (newCameraState) {
+                   case ICameraServiceProxy.CAMERA_STATE_OPEN : {
+                       mOpenEvent = SystemClock.elapsedRealtime();
+                       if (SystemClock.elapsedRealtime() - mClosedEvent < CAMERA_EVENT_DELAY_TIME) {
+                           mHandler.removeMessages(MSG_CAMERA_CLOSED);
+                       }
+                       mHandler.sendEmptyMessageDelayed(MSG_CAMERA_OPEN, CAMERA_EVENT_DELAY_TIME);
+                   } break;
+                   case ICameraServiceProxy.CAMERA_STATE_CLOSED : {
+                       mClosedEvent = SystemClock.elapsedRealtime();
+                       if (SystemClock.elapsedRealtime() - mOpenEvent < CAMERA_EVENT_DELAY_TIME) {
+                           mHandler.removeMessages(MSG_CAMERA_OPEN);
+                       }
+                       mHandler.sendEmptyMessageDelayed(MSG_CAMERA_CLOSED, CAMERA_EVENT_DELAY_TIME);
+                   } break;
+                }
+            }
         }
     };
 
@@ -201,10 +254,16 @@ public class CameraServiceProxy extends SystemService
         mHandlerThread.start();
         mHandler = new Handler(mHandlerThread.getLooper(), this);
 
-        mNotifyNfc = SystemProperties.getInt(NFC_NOTIFICATION_PROP, 0) > 0;
-        if (DEBUG) Slog.v(TAG, "Notify NFC behavior is " + (mNotifyNfc ? "active" : "disabled"));
+        int notifyNfc = SystemProperties.getInt(NFC_NOTIFICATION_PROP, 0);
+        if (notifyNfc < NFC_NOTIFY_NONE || notifyNfc > NFC_NOTIFY_FRONT) {
+            notifyNfc = NFC_NOTIFY_NONE;
+        }
+        mNotifyNfc = notifyNfc;
+        if (DEBUG) Slog.v(TAG, "Notify NFC state is " + nfcNotifyToString(mNotifyNfc));
         mAllowMediaUid = mContext.getResources().getBoolean(
                 com.android.internal.R.bool.config_allowMediaUidForCameraServiceProxy);
+        mSendCameraStatusIntent = mContext.getResources().getBoolean(
+                com.android.internal.R.bool.config_sendCameraStatusIntent);
     }
 
     @Override
@@ -212,6 +271,12 @@ public class CameraServiceProxy extends SystemService
         switch(msg.what) {
             case MSG_SWITCH_USER: {
                 notifySwitchWithRetries(msg.arg1);
+            } break;
+            case MSG_CAMERA_CLOSED: {
+                sendCameraStateIntent("0");
+            } break;
+            case MSG_CAMERA_OPEN: {
+                sendCameraStateIntent("1");
             } break;
             default: {
                 Slog.e(TAG, "CameraServiceProxy error, invalid message: " + msg.what);
@@ -247,7 +312,8 @@ public class CameraServiceProxy extends SystemService
     public void onStartUser(int userHandle) {
         synchronized(mLock) {
             if (mEnabledCameraUsers == null) {
-                // Initialize mediaserver, or update mediaserver if we are recovering from a crash.
+                // Initialize cameraserver, or update cameraserver if we are recovering
+                // from a crash.
                 switchUserLocked(userHandle);
             }
         }
@@ -270,12 +336,10 @@ public class CameraServiceProxy extends SystemService
             mCameraServiceRaw = null;
 
             // All cameras reset to idle on camera service death
-            boolean wasEmpty = mActiveCameraUsage.isEmpty();
             mActiveCameraUsage.clear();
 
-            if ( mNotifyNfc && !wasEmpty ) {
-                notifyNfcService(/*enablePolling*/ true);
-            }
+            // Ensure NFC is back on
+            notifyNfcService(/*enablePolling*/ true);
         }
     }
 
@@ -329,9 +393,9 @@ public class CameraServiceProxy extends SystemService
         Set<Integer> currentUserHandles = getEnabledUserHandles(userHandle);
         mLastUser = userHandle;
         if (mEnabledCameraUsers == null || !mEnabledCameraUsers.equals(currentUserHandles)) {
-            // Some user handles have been added or removed, update mediaserver.
+            // Some user handles have been added or removed, update cameraserver.
             mEnabledCameraUsers = currentUserHandles;
-            notifyMediaserverLocked(ICameraService.EVENT_USER_SWITCHED, currentUserHandles);
+            notifySwitchWithRetriesLocked(RETRY_TIMES);
         }
     }
 
@@ -348,12 +412,16 @@ public class CameraServiceProxy extends SystemService
 
     private void notifySwitchWithRetries(int retries) {
         synchronized(mLock) {
-            if (mEnabledCameraUsers == null) {
-                return;
-            }
-            if (notifyMediaserverLocked(ICameraService.EVENT_USER_SWITCHED, mEnabledCameraUsers)) {
-                retries = 0;
-            }
+            notifySwitchWithRetriesLocked(retries);
+        }
+    }
+
+    private void notifySwitchWithRetriesLocked(int retries) {
+        if (mEnabledCameraUsers == null) {
+            return;
+        }
+        if (notifyCameraserverLocked(ICameraService.EVENT_USER_SWITCHED, mEnabledCameraUsers)) {
+            retries = 0;
         }
         if (retries <= 0) {
             return;
@@ -363,13 +431,13 @@ public class CameraServiceProxy extends SystemService
                 RETRY_DELAY_TIME);
     }
 
-    private boolean notifyMediaserverLocked(int eventType, Set<Integer> updatedUserHandles) {
-        // Forward the user switch event to the native camera service running in the mediaserver
+    private boolean notifyCameraserverLocked(int eventType, Set<Integer> updatedUserHandles) {
+        // Forward the user switch event to the native camera service running in the cameraserver
         // process.
         if (mCameraServiceRaw == null) {
             IBinder cameraServiceBinder = getBinderService(CAMERA_SERVICE_BINDER_NAME);
             if (cameraServiceBinder == null) {
-                Slog.w(TAG, "Could not notify mediaserver, camera service not available.");
+                Slog.w(TAG, "Could not notify cameraserver, camera service not available.");
                 return false; // Camera service not active, cannot evict user clients.
             }
             try {
@@ -385,7 +453,7 @@ public class CameraServiceProxy extends SystemService
         try {
             mCameraServiceRaw.notifySystemEvent(eventType, toArray(updatedUserHandles));
         } catch (RemoteException e) {
-            Slog.w(TAG, "Could not notify mediaserver, remote exception: " + e);
+            Slog.w(TAG, "Could not notify cameraserver, remote exception: " + e);
             // Not much we can do if camera service is dead.
             return false;
         }
@@ -414,6 +482,24 @@ public class CameraServiceProxy extends SystemService
                     }
                     break;
                 case ICameraServiceProxy.CAMERA_STATE_ACTIVE:
+                    // Check current active camera IDs to see if this package is already talking to
+                    // some camera
+                    boolean alreadyActivePackage = false;
+                    for (int i = 0; i < mActiveCameraUsage.size(); i++) {
+                        if (mActiveCameraUsage.valueAt(i).mClientName.equals(clientName)) {
+                            alreadyActivePackage = true;
+                            break;
+                        }
+                    }
+                    // If not already active, notify window manager about this new package using a
+                    // camera
+                    if (!alreadyActivePackage) {
+                        WindowManagerInternal wmi =
+                                LocalServices.getService(WindowManagerInternal.class);
+                        wmi.addNonHighRefreshRatePackage(clientName);
+                    }
+
+                    // Update activity events
                     CameraUsageEvent newEvent = new CameraUsageEvent(facing, clientName, apiLevel);
                     CameraUsageEvent oldEvent = mActiveCameraUsage.put(cameraId, newEvent);
                     if (oldEvent != null) {
@@ -425,23 +511,59 @@ public class CameraServiceProxy extends SystemService
                 case ICameraServiceProxy.CAMERA_STATE_IDLE:
                 case ICameraServiceProxy.CAMERA_STATE_CLOSED:
                     CameraUsageEvent doneEvent = mActiveCameraUsage.remove(cameraId);
-                    if (doneEvent != null) {
-                        doneEvent.markCompleted();
-                        mCameraUsageHistory.add(doneEvent);
-                        if (mCameraUsageHistory.size() > MAX_USAGE_HISTORY) {
-                            dumpUsageEvents();
+                    if (doneEvent == null) break;
+
+                    doneEvent.markCompleted();
+                    mCameraUsageHistory.add(doneEvent);
+                    if (mCameraUsageHistory.size() > MAX_USAGE_HISTORY) {
+                        dumpUsageEvents();
+                    }
+
+                    // Check current active camera IDs to see if this package is still talking to
+                    // some camera
+                    boolean stillActivePackage = false;
+                    for (int i = 0; i < mActiveCameraUsage.size(); i++) {
+                        if (mActiveCameraUsage.valueAt(i).mClientName.equals(clientName)) {
+                            stillActivePackage = true;
+                            break;
                         }
                     }
+                    // If not longer active, notify window manager about this package being done
+                    // with camera
+                    if (!stillActivePackage) {
+                        WindowManagerInternal wmi =
+                                LocalServices.getService(WindowManagerInternal.class);
+                        wmi.removeNonHighRefreshRatePackage(clientName);
+                    }
+
                     break;
             }
-            boolean isEmpty = mActiveCameraUsage.isEmpty();
-            if ( mNotifyNfc && (wasEmpty != isEmpty) ) {
-                notifyNfcService(isEmpty);
+            switch (mNotifyNfc) {
+                case NFC_NOTIFY_NONE:
+                    break;
+                case NFC_NOTIFY_ALL:
+                    notifyNfcService(mActiveCameraUsage.isEmpty());
+                    break;
+                case NFC_NOTIFY_BACK:
+                case NFC_NOTIFY_FRONT:
+                    boolean enablePolling = true;
+                    int targetFacing = mNotifyNfc == NFC_NOTIFY_BACK
+                            ? ICameraServiceProxy.CAMERA_FACING_BACK :
+                              ICameraServiceProxy.CAMERA_FACING_FRONT;
+                    for (int i = 0; i < mActiveCameraUsage.size(); i++) {
+                        if (mActiveCameraUsage.valueAt(i).mCameraFacing == targetFacing) {
+                            enablePolling = false;
+                            break;
+                        }
+                    }
+                    notifyNfcService(enablePolling);
+                    break;
             }
         }
     }
 
     private void notifyNfcService(boolean enablePolling) {
+        if (enablePolling == mLastNfcPollState) return;
 
         IBinder nfcServiceBinder = getBinderService(NFC_SERVICE_BINDER_NAME);
         if (nfcServiceBinder == null) {
@@ -450,9 +572,14 @@ public class CameraServiceProxy extends SystemService
         }
         INfcAdapter nfcAdapterRaw = INfcAdapter.Stub.asInterface(nfcServiceBinder);
         int flags = enablePolling ? ENABLE_POLLING_FLAGS : DISABLE_POLLING_FLAGS;
-        if (DEBUG) Slog.v(TAG, "Setting NFC reader mode to flags " + flags);
+        if (DEBUG) {
+            Slog.v(TAG, "Setting NFC reader mode to flags " + flags
+                    + " to turn polling " + enablePolling);
+        }
+
         try {
             nfcAdapterRaw.setReaderMode(nfcInterfaceToken, null, flags, null);
+            mLastNfcPollState = enablePolling;
         } catch (RemoteException e) {
             Slog.w(TAG, "Could not notify NFC service, remote exception: " + e);
         }
@@ -489,4 +616,20 @@ public class CameraServiceProxy extends SystemService
         return "CAMERA_FACING_UNKNOWN";
     }
 
+    private void sendCameraStateIntent(String cameraState) {
+        Intent intent = new Intent(android.content.Intent.ACTION_CAMERA_STATUS_CHANGED);
+        intent.putExtra(android.content.Intent.EXTRA_CAMERA_STATE, cameraState);
+        mContext.sendBroadcastAsUser(intent, UserHandle.SYSTEM);
+
+    }
+
+    private static String nfcNotifyToString(@NfcNotifyState int nfcNotifyState) {
+        switch (nfcNotifyState) {
+            case NFC_NOTIFY_NONE: return "NFC_NOTIFY_NONE";
+            case NFC_NOTIFY_ALL: return "NFC_NOTIFY_ALL";
+            case NFC_NOTIFY_BACK: return "NFC_NOTIFY_BACK";
+            case NFC_NOTIFY_FRONT: return "NFC_NOTIFY_FRONT";
+        }
+        return "UNKNOWN_NFC_NOTIFY";
+    }
 }

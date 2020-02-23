@@ -16,20 +16,17 @@
 
 package com.android.server.wm;
 
-import static android.graphics.PixelFormat.OPAQUE;
-import static android.view.SurfaceControl.FX_SURFACE_DIM;
 import static com.android.server.wm.WindowManagerDebugConfig.SHOW_SURFACE_ALLOC;
 import static com.android.server.wm.WindowManagerDebugConfig.SHOW_TRANSACTIONS;
 import static com.android.server.wm.WindowManagerDebugConfig.TAG_WM;
 
-import java.io.PrintWriter;
-
 import android.graphics.Matrix;
-import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.util.Slog;
 import android.view.Surface.OutOfResourcesException;
 import android.view.SurfaceControl;
+
+import java.io.PrintWriter;
 
 /**
  * Four black surfaces put together to make a black frame.
@@ -51,13 +48,14 @@ public class BlackFrame {
 
             surface = dc.makeOverlay()
                     .setName("BlackSurface")
-                    .setSize(w, h)
-                    .setColorLayer(true)
+                    .setColorLayer()
                     .setParent(null) // TODO: Work-around for b/69259549
                     .build();
-
+            transaction.setWindowCrop(surface, w, h);
+            transaction.setLayerStack(surface, dc.getDisplayId());
             transaction.setAlpha(surface, 1);
             transaction.setLayer(surface, layer);
+            transaction.setPosition(surface, left, top);
             transaction.show(surface);
             if (SHOW_TRANSACTIONS || SHOW_SURFACE_ALLOC) Slog.i(TAG_WM,
                             "  BLACK " + surface + ": CREATE layer=" + layer);
@@ -99,6 +97,7 @@ public class BlackFrame {
     final BlackSurface[] mBlackSurfaces = new BlackSurface[4];
 
     final boolean mForceDefaultOrientation;
+    private final TransactionFactory mTransactionFactory;
 
     public void printTo(String prefix, PrintWriter pw) {
         pw.print(prefix); pw.print("Outer: "); mOuterRect.printShortString(pw);
@@ -113,11 +112,12 @@ public class BlackFrame {
         }
     }
 
-    public BlackFrame(SurfaceControl.Transaction t,
-            Rect outer, Rect inner, int layer, DisplayContent dc,
-            boolean forceDefaultOrientation) throws OutOfResourcesException {
+    public BlackFrame(TransactionFactory factory, SurfaceControl.Transaction t, Rect outer,
+            Rect inner, int layer, DisplayContent dc, boolean forceDefaultOrientation)
+            throws OutOfResourcesException {
         boolean success = false;
 
+        mTransactionFactory = factory;
         mForceDefaultOrientation = forceDefaultOrientation;
 
         // TODO: Why do we use 4 surfaces instead of just one big one behind the screenshot?
@@ -151,14 +151,16 @@ public class BlackFrame {
 
     public void kill() {
         if (mBlackSurfaces != null) {
+            SurfaceControl.Transaction t = mTransactionFactory.make();
             for (int i=0; i<mBlackSurfaces.length; i++) {
                 if (mBlackSurfaces[i] != null) {
                     if (SHOW_TRANSACTIONS || SHOW_SURFACE_ALLOC) Slog.i(TAG_WM,
                             "  BLACK " + mBlackSurfaces[i].surface + ": DESTROY");
-                    mBlackSurfaces[i].surface.destroy();
+                    t.remove(mBlackSurfaces[i].surface);
                     mBlackSurfaces[i] = null;
                 }
             }
+            t.apply();
         }
     }
 

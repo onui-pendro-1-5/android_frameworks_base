@@ -37,12 +37,14 @@ public interface NetworkController extends CallbackController<SignalCallback>, D
     DataUsageController getMobileDataController();
     DataSaverController getDataSaverController();
     String getMobileDataNetworkName();
+    int getNumberSubscriptions();
 
     boolean hasVoiceCallingFeature();
 
     void addEmergencyListener(EmergencyListener listener);
     void removeEmergencyListener(EmergencyListener listener);
     boolean hasEmergencyCryptKeeperText();
+
     boolean isRadioOn();
 
     public interface SignalCallback {
@@ -50,10 +52,31 @@ public interface NetworkController extends CallbackController<SignalCallback>, D
                 boolean activityIn, boolean activityOut, String description, boolean isTransient,
                 String statusLabel) {}
 
+        /**
+         * Callback for listeners to be able to update the state of any UI tracking connectivity
+         *  @param statusIcon the icon that should be shown in the status bar
+         * @param qsIcon the icon to show in Quick Settings
+         * @param statusType the resId of the data type icon (e.g. LTE) to show in the status bar
+         * @param qsType similar to above, the resId of the data type icon to show in Quick Settings
+         * @param activityIn indicates whether there is inbound activity
+         * @param activityOut indicates outbound activity
+         * @param typeContentDescription the contentDescription of the data type
+         * @param typeContentDescriptionHtml the (possibly HTML-styled) contentDescription of the
+         *                                   data type. Suitable for display
+         * @param description description of the network (usually just the network name)
+         * @param isWide //TODO: unused?
+         * @param subId subscription ID for which to update the UI
+         * @param roaming indicates roaming
+         */
         default void setMobileDataIndicators(IconState statusIcon, IconState qsIcon, int statusType,
-                int qsType, boolean activityIn, boolean activityOut, String typeContentDescription,
-                String description, boolean isWide, int subId, boolean roaming) {}
+                int qsType, boolean activityIn, boolean activityOut,
+                CharSequence typeContentDescription,
+                CharSequence typeContentDescriptionHtml, CharSequence description,
+                boolean isWide, int subId, boolean roaming) {
+        }
+
         default void setSubs(List<SubscriptionInfo> subs) {}
+
         default void setNoSims(boolean show, boolean simDetected) {}
 
         default void setEthernetIndicators(IconState icon) {}

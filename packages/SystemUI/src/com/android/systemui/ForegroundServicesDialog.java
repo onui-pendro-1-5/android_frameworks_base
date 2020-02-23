@@ -42,8 +42,6 @@ import com.android.internal.app.AlertController;
 import com.android.internal.logging.MetricsLogger;
 import com.android.internal.logging.nano.MetricsProto;
 
-import com.android.systemui.R;
-
 import java.util.ArrayList;
 
 /**
@@ -77,7 +75,7 @@ public final class ForegroundServicesDialog extends AlertActivity implements
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        Dependency.initDependencies(getApplicationContext());
+        Dependency.initDependencies(SystemUIFactory.getInstance().getRootComponent());
 
         mMetricsLogger = Dependency.get(MetricsLogger.class);
 

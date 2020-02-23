@@ -16,16 +16,16 @@
 
 package com.android.systemui.statusbar.phone;
 
+import static com.android.systemui.statusbar.phone.StatusBarIconController.TAG_PRIMARY;
+
 import android.annotation.NonNull;
 import android.annotation.Nullable;
+
 import com.android.internal.annotations.VisibleForTesting;
-import com.android.internal.statusbar.StatusBarIcon;
+
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
-
-import static com.android.systemui.statusbar.phone.StatusBarIconController.TAG_PRIMARY;
-import com.android.systemui.statusbar.NetworkTraffic;
 
 public class StatusBarIconList {
     private ArrayList<Slot> mSlots = new ArrayList<>();

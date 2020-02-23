@@ -20,9 +20,6 @@ import android.content.Context;
 import android.os.RemoteException;
 import android.os.SystemClock;
 import android.util.Slog;
-import android.view.IWindowManager;
-import android.view.WindowManager;
-import android.view.WindowManagerGlobal;
 import android.widget.Toast;
 
 import com.android.systemui.R;
@@ -59,7 +56,7 @@ public class ScreenPinningNotify {
     }
 
     /** Show a toast that describes the gesture the user should use to escape pinned mode. */
-    public void showEscapeToast(boolean isRecentsButtonVisible) {
+    public void showEscapeToast(boolean isGestureNavEnabled, boolean isRecentsButtonVisible) {
         long showToastTime = SystemClock.elapsedRealtime();
         if ((showToastTime - mLastShowToastTime) < SHOW_TOAST_MINIMUM_INTERVAL) {
             Slog.i(TAG, "Ignore toast since it is requested in very short interval.");
@@ -68,11 +65,11 @@ public class ScreenPinningNotify {
         if (mLastToast != null) {
             mLastToast.cancel();
         }
-        mLastToast = makeAllUserToastAndShow(!hasNavigationBar()
-                ? (supportsGesturesOnFP() ? R.string.screen_pinning_toast_no_navbar_fpsensor : R.string.screen_pinning_toast_no_navbar)
+        mLastToast = makeAllUserToastAndShow(isGestureNavEnabled
+                ? R.string.screen_pinning_toast_gesture_nav
                 : isRecentsButtonVisible
-                ? R.string.screen_pinning_toast
-                : R.string.screen_pinning_toast_recents_invisible);
+                        ? R.string.screen_pinning_toast
+                        : R.string.screen_pinning_toast_recents_invisible);
         mLastShowToastTime = showToastTime;
     }
 

@@ -18,11 +18,15 @@
 #define LOG_TAG "ImageWriter_JNI"
 #include "android_media_Utils.h"
 
+#include <utils/Condition.h>
 #include <utils/Log.h>
+#include <utils/Mutex.h>
 #include <utils/String8.h>
+#include <utils/Thread.h>
 
 #include <gui/IProducerListener.h>
 #include <gui/Surface.h>
+#include <ui/PublicFormat.h>
 #include <android_runtime/AndroidRuntime.h>
 #include <android_runtime/android_view_Surface.h>
 #include <android_runtime/android_hardware_HardwareBuffer.h>
@@ -33,6 +37,8 @@
 #include <stdint.h>
 #include <inttypes.h>
 #include <android/hardware_buffer_jni.h>
+
+#include <deque>
 
 #define IMAGE_BUFFER_JNI_ID           "mNativeBuffer"
 #define IMAGE_FORMAT_UNKNOWN          0 // This is the same value as ImageFormat#UNKNOWN.
@@ -90,14 +96,124 @@ private:
     int mFormat;
     int mWidth;
     int mHeight;
+
+    // Class for a shared thread used to detach buffers from buffer queues
+    // to discard buffers after consumers are done using them.
+    // This is needed because detaching buffers in onBufferReleased callback
+    // can lead to deadlock when consumer/producer are on the same process.
+    class BufferDetacher {
+    public:
+        // Called by JNIImageWriterContext ctor. Will start the thread for first ref.
+        void addRef();
+        // Called by JNIImageWriterContext dtor. Will stop the thread after ref goes to 0.
+        void removeRef();
+        // Called by onBufferReleased to signal this thread to detach a buffer
+        void detach(wp<Surface>);
+
+    private:
+
+        class DetachThread : public Thread {
+        public:
+            DetachThread() : Thread(/*canCallJava*/false) {};
+
+            void detach(wp<Surface>);
+
+            virtual void requestExit() override;
+
+        private:
+            virtual bool threadLoop() override;
+
+            Mutex     mLock;
+            Condition mCondition;
+            std::deque<wp<Surface>> mQueue;
+
+            static const nsecs_t kWaitDuration = 500000000; // 500 ms
+        };
+        sp<DetachThread> mThread;
+
+        Mutex     mLock;
+        int       mRefCount = 0;
+    };
+
+    static BufferDetacher sBufferDetacher;
 };
 
+JNIImageWriterContext::BufferDetacher JNIImageWriterContext::sBufferDetacher;
+
+void JNIImageWriterContext::BufferDetacher::addRef() {
+    Mutex::Autolock l(mLock);
+    mRefCount++;
+    if (mRefCount == 1) {
+        mThread = new DetachThread();
+        mThread->run("BufDtchThrd");
+    }
+}
+
+void JNIImageWriterContext::BufferDetacher::removeRef() {
+    Mutex::Autolock l(mLock);
+    mRefCount--;
+    if (mRefCount == 0) {
+        mThread->requestExit();
+        mThread->join();
+        mThread.clear();
+    }
+}
+
+void JNIImageWriterContext::BufferDetacher::detach(wp<Surface> bq) {
+    Mutex::Autolock l(mLock);
+    if (mThread == nullptr) {
+        ALOGE("%s: buffer detach thread is gone!", __FUNCTION__);
+        return;
+    }
+    mThread->detach(bq);
+}
+
+void JNIImageWriterContext::BufferDetacher::DetachThread::detach(wp<Surface> bq) {
+    Mutex::Autolock l(mLock);
+    mQueue.push_back(bq);
+    mCondition.signal();
+}
+
+void JNIImageWriterContext::BufferDetacher::DetachThread::requestExit() {
+    Thread::requestExit();
+    {
+        Mutex::Autolock l(mLock);
+        mQueue.clear();
+    }
+    mCondition.signal();
+}
+
+bool JNIImageWriterContext::BufferDetacher::DetachThread::threadLoop() {
+    Mutex::Autolock l(mLock);
+    mCondition.waitRelative(mLock, kWaitDuration);
+
+    while (!mQueue.empty()) {
+        if (exitPending()) {
+            return false;
+        }
+
+        wp<Surface> wbq = mQueue.front();
+        mQueue.pop_front();
+        sp<Surface> bq = wbq.promote();
+        if (bq != nullptr) {
+            sp<Fence> fence;
+            sp<GraphicBuffer> buffer;
+            ALOGV("%s: One buffer is detached", __FUNCTION__);
+            mLock.unlock();
+            bq->detachNextBuffer(&buffer, &fence);
+            mLock.lock();
+        }
+    }
+    return !exitPending();
+}
+
 JNIImageWriterContext::JNIImageWriterContext(JNIEnv* env, jobject weakThiz, jclass clazz) :
-    mWeakThiz(env->NewGlobalRef(weakThiz)),
-    mClazz((jclass)env->NewGlobalRef(clazz)),
-    mFormat(0),
-    mWidth(-1),
-    mHeight(-1) {
+        mWeakThiz(env->NewGlobalRef(weakThiz)),
+        mClazz((jclass)env->NewGlobalRef(clazz)),
+        mFormat(0),
+        mWidth(-1),
+        mHeight(-1) {
+    sBufferDetacher.addRef();
 }
 
 JNIImageWriterContext::~JNIImageWriterContext() {
@@ -115,6 +231,7 @@ JNIImageWriterContext::~JNIImageWriterContext() {
     }
 
     mProducer.clear();
+    sBufferDetacher.removeRef();
 }
 
 JNIEnv* JNIImageWriterContext::getJNIEnv(bool* needsDetach) {
@@ -153,10 +270,7 @@ void JNIImageWriterContext::onBufferReleased() {
         // need let this callback give a BufferItem, then only detach if it was attached to this
         // Writer. Do the detach unconditionally for opaque format now. see b/19977520
         if (mFormat == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED) {
-            sp<Fence> fence;
-            sp<GraphicBuffer> buffer;
-            ALOGV("%s: One buffer is detached", __FUNCTION__);
-            mProducer->detachNextBuffer(&buffer, &fence);
+            sBufferDetacher.detach(mProducer);
         }
 
         env->CallStaticVoidMethod(mClazz, gImageWriterClassInfo.postEventFromNative, mWeakThiz);
@@ -288,8 +402,28 @@ static jlong ImageWriter_init(JNIEnv* env, jobject thiz, jobject weakThiz, jobje
             return 0;
         }
     } else {
+        // Set consumer buffer format to user specified format
+        PublicFormat publicFormat = static_cast<PublicFormat>(userFormat);
+        int nativeFormat = mapPublicFormatToHalFormat(publicFormat);
+        android_dataspace nativeDataspace = mapPublicFormatToHalDataspace(publicFormat);
+        res = native_window_set_buffers_format(anw.get(), nativeFormat);
+        if (res != OK) {
+            ALOGE("%s: Unable to configure consumer native buffer format to %#x",
+                    __FUNCTION__, nativeFormat);
+            jniThrowRuntimeException(env, "Failed to set Surface format");
+            return 0;
+        }
+
+        res = native_window_set_buffers_data_space(anw.get(), nativeDataspace);
+        if (res != OK) {
+            ALOGE("%s: Unable to configure consumer dataspace %#x",
+                    __FUNCTION__, nativeDataspace);
+            jniThrowRuntimeException(env, "Failed to set Surface dataspace");
+            return 0;
+        }
         surfaceFormat = userFormat;
     }
+
     ctx->setBufferFormat(surfaceFormat);
     env->SetIntField(thiz,
             gImageWriterClassInfo.mWriterFormat, reinterpret_cast<jint>(surfaceFormat));

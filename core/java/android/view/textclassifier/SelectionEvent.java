@@ -19,11 +19,14 @@ package android.view.textclassifier;
 import android.annotation.IntDef;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
+import android.annotation.UserIdInt;
 import android.os.Parcel;
 import android.os.Parcelable;
+import android.os.UserHandle;
 import android.view.textclassifier.TextClassifier.EntityType;
 import android.view.textclassifier.TextClassifier.WidgetType;
 
+import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.util.Preconditions;
 
 import java.lang.annotation.Retention;
@@ -115,7 +118,7 @@ public final class SelectionEvent implements Parcelable {
     /** Unknown invocation method */
     public static final int INVOCATION_UNKNOWN = 0;
 
-    private static final String NO_SIGNATURE = "";
+    static final String NO_SIGNATURE = "";
 
     private final int mAbsoluteStart;
     private final int mAbsoluteEnd;
@@ -126,6 +129,7 @@ public final class SelectionEvent implements Parcelable {
     private String mWidgetType = TextClassifier.WIDGET_TYPE_UNKNOWN;
     private @InvocationMethod int mInvocationMethod;
     @Nullable private String mWidgetVersion;
+    private @UserIdInt int mUserId = UserHandle.USER_NULL;
     @Nullable private String mResultId;
     private long mEventTime;
     private long mDurationSinceSessionStart;
@@ -170,6 +174,7 @@ public final class SelectionEvent implements Parcelable {
         mEnd = in.readInt();
         mSmartStart = in.readInt();
         mSmartEnd = in.readInt();
+        mUserId = in.readInt();
     }
 
     @Override
@@ -198,6 +203,7 @@ public final class SelectionEvent implements Parcelable {
         dest.writeInt(mEnd);
         dest.writeInt(mSmartStart);
         dest.writeInt(mSmartEnd);
+        dest.writeInt(mUserId);
     }
 
     @Override
@@ -374,8 +380,10 @@ public final class SelectionEvent implements Parcelable {
 
     /**
      * Sets the event type.
+     * @hide
      */
-    void setEventType(@EventType int eventType) {
+    @VisibleForTesting(visibility = VisibleForTesting.Visibility.PACKAGE)
+    public void setEventType(@EventType int eventType) {
         mEventType = eventType;
     }
 
@@ -398,6 +406,24 @@ public final class SelectionEvent implements Parcelable {
     }
 
     /**
+     * Sets the id of this event's user.
+     * <p>
+     * Package-private for SystemTextClassifier's use.
+     */
+    void setUserId(@UserIdInt int userId) {
+        mUserId = userId;
+    }
+
+    /**
+     * Returns the id of this event's user.
+     * @hide
+     */
+    @UserIdInt
+    public int getUserId() {
+        return mUserId;
+    }
+
+    /**
      * Returns the type of widget that was involved in triggering this event.
      */
     @WidgetType
@@ -416,11 +442,14 @@ public final class SelectionEvent implements Parcelable {
 
     /**
      * Sets the {@link TextClassificationContext} for this event.
+     * @hide
      */
-    void setTextClassificationSessionContext(TextClassificationContext context) {
+    @VisibleForTesting(visibility = VisibleForTesting.Visibility.PACKAGE)
+    public void setTextClassificationSessionContext(TextClassificationContext context) {
         mPackageName = context.getPackageName();
         mWidgetType = context.getWidgetType();
         mWidgetVersion = context.getWidgetVersion();
+        mUserId = context.getUserId();
     }
 
     /**
@@ -432,8 +461,10 @@ public final class SelectionEvent implements Parcelable {
 
     /**
      * Sets the invocationMethod for this event.
+     * @hide
      */
-    void setInvocationMethod(@InvocationMethod int invocationMethod) {
+    @VisibleForTesting(visibility = VisibleForTesting.Visibility.PACKAGE)
+    public void setInvocationMethod(@InvocationMethod int invocationMethod) {
         mInvocationMethod = invocationMethod;
     }
 
@@ -495,7 +526,9 @@ public final class SelectionEvent implements Parcelable {
         return mEventIndex;
     }
 
-    SelectionEvent setEventIndex(int index) {
+    /** @hide */
+    @VisibleForTesting(visibility = VisibleForTesting.Visibility.PACKAGE)
+    public SelectionEvent setEventIndex(int index) {
         mEventIndex = index;
         return this;
     }
@@ -508,7 +541,9 @@ public final class SelectionEvent implements Parcelable {
         return mSessionId;
     }
 
-    SelectionEvent setSessionId(TextClassificationSessionId id) {
+    /** @hide */
+    @VisibleForTesting(visibility = VisibleForTesting.Visibility.PACKAGE)
+    public SelectionEvent setSessionId(@Nullable TextClassificationSessionId id) {
         mSessionId = id;
         return this;
     }
@@ -521,7 +556,9 @@ public final class SelectionEvent implements Parcelable {
         return mStart;
     }
 
-    SelectionEvent setStart(int start) {
+    /** @hide */
+    @VisibleForTesting(visibility = VisibleForTesting.Visibility.PACKAGE)
+    public SelectionEvent setStart(int start) {
         mStart = start;
         return this;
     }
@@ -534,7 +571,9 @@ public final class SelectionEvent implements Parcelable {
         return mEnd;
     }
 
-    SelectionEvent setEnd(int end) {
+    /** @hide */
+    @VisibleForTesting(visibility = VisibleForTesting.Visibility.PACKAGE)
+    public SelectionEvent setEnd(int end) {
         mEnd = end;
         return this;
     }
@@ -547,7 +586,9 @@ public final class SelectionEvent implements Parcelable {
         return mSmartStart;
     }
 
-    SelectionEvent setSmartStart(int start) {
+    /** @hide */
+    @VisibleForTesting(visibility = VisibleForTesting.Visibility.PACKAGE)
+    public SelectionEvent setSmartStart(int start) {
         this.mSmartStart = start;
         return this;
     }
@@ -560,7 +601,9 @@ public final class SelectionEvent implements Parcelable {
         return mSmartEnd;
     }
 
-    SelectionEvent setSmartEnd(int end) {
+    /** @hide */
+    @VisibleForTesting(visibility = VisibleForTesting.Visibility.PACKAGE)
+    public SelectionEvent setSmartEnd(int end) {
         mSmartEnd = end;
         return this;
     }
@@ -593,7 +636,7 @@ public final class SelectionEvent implements Parcelable {
     @Override
     public int hashCode() {
         return Objects.hash(mAbsoluteStart, mAbsoluteEnd, mEventType, mEntityType,
-                mWidgetVersion, mPackageName, mWidgetType, mInvocationMethod, mResultId,
+                mWidgetVersion, mPackageName, mUserId, mWidgetType, mInvocationMethod, mResultId,
                 mEventTime, mDurationSinceSessionStart, mDurationSincePreviousEvent,
                 mEventIndex, mSessionId, mStart, mEnd, mSmartStart, mSmartEnd);
     }
@@ -614,6 +657,7 @@ public final class SelectionEvent implements Parcelable {
                 && Objects.equals(mEntityType, other.mEntityType)
                 && Objects.equals(mWidgetVersion, other.mWidgetVersion)
                 && Objects.equals(mPackageName, other.mPackageName)
+                && mUserId == other.mUserId
                 && Objects.equals(mWidgetType, other.mWidgetType)
                 && mInvocationMethod == other.mInvocationMethod
                 && Objects.equals(mResultId, other.mResultId)
@@ -633,17 +677,17 @@ public final class SelectionEvent implements Parcelable {
         return String.format(Locale.US,
                 "SelectionEvent {absoluteStart=%d, absoluteEnd=%d, eventType=%d, entityType=%s, "
                         + "widgetVersion=%s, packageName=%s, widgetType=%s, invocationMethod=%s, "
-                        + "resultId=%s, eventTime=%d, durationSinceSessionStart=%d, "
+                        + "userId=%d, resultId=%s, eventTime=%d, durationSinceSessionStart=%d, "
                         + "durationSincePreviousEvent=%d, eventIndex=%d,"
                         + "sessionId=%s, start=%d, end=%d, smartStart=%d, smartEnd=%d}",
                 mAbsoluteStart, mAbsoluteEnd, mEventType, mEntityType,
                 mWidgetVersion, mPackageName, mWidgetType, mInvocationMethod,
-                mResultId, mEventTime, mDurationSinceSessionStart,
+                mUserId, mResultId, mEventTime, mDurationSinceSessionStart,
                 mDurationSincePreviousEvent, mEventIndex,
                 mSessionId, mStart, mEnd, mSmartStart, mSmartEnd);
     }
 
-    public static final Creator<SelectionEvent> CREATOR = new Creator<SelectionEvent>() {
+    public static final @android.annotation.NonNull Creator<SelectionEvent> CREATOR = new Creator<SelectionEvent>() {
         @Override
         public SelectionEvent createFromParcel(Parcel in) {
             return new SelectionEvent(in);

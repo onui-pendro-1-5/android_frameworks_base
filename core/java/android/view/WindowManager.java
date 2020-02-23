@@ -50,6 +50,7 @@ import android.annotation.RequiresPermission;
 import android.annotation.SystemApi;
 import android.annotation.SystemService;
 import android.annotation.TestApi;
+import android.annotation.UnsupportedAppUsage;
 import android.app.KeyguardManager;
 import android.app.Presentation;
 import android.content.Context;
@@ -254,6 +255,19 @@ public interface WindowManager extends ViewManager {
     int TRANSIT_CRASHING_ACTIVITY_CLOSE = 26;
 
     /**
+     * A task is changing windowing modes
+     * @hide
+     */
+    int TRANSIT_TASK_CHANGE_WINDOWING_MODE = 27;
+
+    /**
+     * A display which can only contain one task is being shown because the first activity is
+     * started or it's being turned on.
+     * @hide
+     */
+    int TRANSIT_SHOW_SINGLE_TASK_DISPLAY = 28;
+
+    /**
      * @hide
      */
     @IntDef(prefix = { "TRANSIT_" }, value = {
@@ -279,7 +293,9 @@ public interface WindowManager extends ViewManager {
             TRANSIT_KEYGUARD_UNOCCLUDE,
             TRANSIT_TRANSLUCENT_ACTIVITY_OPEN,
             TRANSIT_TRANSLUCENT_ACTIVITY_CLOSE,
-            TRANSIT_CRASHING_ACTIVITY_CLOSE
+            TRANSIT_CRASHING_ACTIVITY_CLOSE,
+            TRANSIT_TASK_CHANGE_WINDOWING_MODE,
+            TRANSIT_SHOW_SINGLE_TASK_DISPLAY
     })
     @Retention(RetentionPolicy.SOURCE)
     @interface TransitionType {}
@@ -303,6 +319,12 @@ public interface WindowManager extends ViewManager {
     int TRANSIT_FLAG_KEYGUARD_GOING_AWAY_WITH_WALLPAPER = 0x4;
 
     /**
+     * Transition flag: Keyguard is going away with subtle animation.
+     * @hide
+     */
+    int TRANSIT_FLAG_KEYGUARD_GOING_AWAY_SUBTLE_ANIMATION = 0x8;
+
+    /**
      * @hide
      */
     @IntDef(flag = true, prefix = { "TRANSIT_FLAG_" }, value = {
@@ -312,6 +334,36 @@ public interface WindowManager extends ViewManager {
     })
     @Retention(RetentionPolicy.SOURCE)
     @interface TransitionFlags {}
+
+    /**
+     * Remove content mode: Indicates remove content mode is currently not defined.
+     * @hide
+     */
+    int REMOVE_CONTENT_MODE_UNDEFINED = 0;
+
+    /**
+     * Remove content mode: Indicates that when display is removed, all its activities will be moved
+     * to the primary display and the topmost activity should become focused.
+     * @hide
+     */
+    int REMOVE_CONTENT_MODE_MOVE_TO_PRIMARY = 1;
+
+    /**
+     * Remove content mode: Indicates that when display is removed, all its stacks and tasks will be
+     * removed, all activities will be destroyed according to the usual lifecycle.
+     * @hide
+     */
+    int REMOVE_CONTENT_MODE_DESTROY = 2;
+
+    /**
+     * @hide
+     */
+    @IntDef(prefix = { "REMOVE_CONTENT_MODE_" }, value = {
+            REMOVE_CONTENT_MODE_UNDEFINED,
+            REMOVE_CONTENT_MODE_MOVE_TO_PRIMARY,
+            REMOVE_CONTENT_MODE_DESTROY,
+    })
+    @interface RemoveContentMode {}
 
     /**
      * Exception that is thrown when trying to add view whose
@@ -421,6 +473,74 @@ public interface WindowManager extends ViewManager {
     @RequiresPermission(android.Manifest.permission.RESTRICTED_VR_ACCESS)
     public Region getCurrentImeTouchRegion();
 
+    /**
+     * Sets that the display should show its content when non-secure keyguard is shown.
+     *
+     * @param displayId Display ID.
+     * @param shouldShow Indicates that the display should show its content when non-secure keyguard
+     *                  is shown.
+     * @see KeyguardManager#isDeviceSecure()
+     * @see KeyguardManager#isDeviceLocked()
+     * @hide
+     */
+    @TestApi
+    default void setShouldShowWithInsecureKeyguard(int displayId, boolean shouldShow) {
+    }
+
+    /**
+     * Sets that the display should show system decors.
+     * <p>
+     * System decors include status bar, navigation bar, launcher.
+     * </p>
+     *
+     * @param displayId The id of the display.
+     * @param shouldShow Indicates that the display should show system decors.
+     * @see #shouldShowSystemDecors(int)
+     * @hide
+     */
+    @TestApi
+    default void setShouldShowSystemDecors(int displayId, boolean shouldShow) {
+    }
+
+    /**
+     * Checks if the display supports showing system decors.
+     * <p>
+     * System decors include status bar, navigation bar, launcher.
+     * </p>
+     *
+     * @param displayId The id of the display.
+     * @see #setShouldShowSystemDecors(int, boolean)
+     * @hide
+     */
+    @TestApi
+    default boolean shouldShowSystemDecors(int displayId) {
+        return false;
+    }
+
+    /**
+     * Sets that the display should show IME.
+     *
+     * @param displayId Display ID.
+     * @param shouldShow Indicates that the display should show IME.
+     * @hide
+     */
+    @TestApi
+    default void setShouldShowIme(int displayId, boolean shouldShow) {
+    }
+
+    /**
+     * Indicates that the display should show IME.
+     *
+     * @param displayId The id of the display.
+     * @return {@code true} if the display should show IME when an input field becomes
+     * focused on it.
+     * @hide
+     */
+    @TestApi
+    default boolean shouldShowIme(int displayId) {
+        return false;
+    }
+
     public static class LayoutParams extends ViewGroup.LayoutParams implements Parcelable {
         /**
          * X position for this window.  With the default gravity it is ignored.
@@ -486,7 +606,6 @@ public interface WindowManager extends ViewManager {
          * @see #TYPE_APPLICATION_PANEL
          * @see #TYPE_APPLICATION_MEDIA
          * @see #TYPE_APPLICATION_SUB_PANEL
-         * @see #TYPE_APPLICATION_ABOVE_SUB_PANEL
          * @see #TYPE_APPLICATION_ATTACHED_DIALOG
          * @see #TYPE_STATUS_BAR
          * @see #TYPE_SEARCH_BAR
@@ -675,6 +794,7 @@ public interface WindowManager extends ViewManager {
          * is a big ugly hack so:
          * @hide
          */
+        @UnsupportedAppUsage
         public static final int TYPE_APPLICATION_MEDIA_OVERLAY  = FIRST_SUB_WINDOW + 4;
 
         /**
@@ -827,6 +947,7 @@ public interface WindowManager extends ViewManager {
          * In multiuser systems shows only on the owning user's window.
          * @hide
          */
+        @UnsupportedAppUsage
         public static final int TYPE_SECURE_SYSTEM_OVERLAY = FIRST_SYSTEM_WINDOW+15;
 
         /**
@@ -902,6 +1023,7 @@ public interface WindowManager extends ViewManager {
          * In multiuser systems shows on all users' windows.
          * @hide
          */
+        @UnsupportedAppUsage
         public static final int TYPE_DISPLAY_OVERLAY = FIRST_SYSTEM_WINDOW+26;
 
         /**
@@ -1351,6 +1473,9 @@ public interface WindowManager extends ViewManager {
          * <p>When this flag is enabled for a window, it automatically sets
          * the system UI visibility flags {@link View#SYSTEM_UI_FLAG_LAYOUT_STABLE} and
          * {@link View#SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN}.</p>
+         *
+         * <p>Note: For devices that support
+         * {@link android.content.pm.PackageManager#FEATURE_AUTOMOTIVE} this flag may be ignored.
          */
         public static final int FLAG_TRANSLUCENT_STATUS = 0x04000000;
 
@@ -1370,6 +1495,10 @@ public interface WindowManager extends ViewManager {
          * <p>When this flag is enabled for a window, it automatically sets
          * the system UI visibility flags {@link View#SYSTEM_UI_FLAG_LAYOUT_STABLE} and
          * {@link View#SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION}.</p>
+         *
+         * <p>Note: For devices that support
+         * {@link android.content.pm.PackageManager#FEATURE_AUTOMOTIVE} this flag can be disabled
+         * by the car manufacturers.
          */
         public static final int FLAG_TRANSLUCENT_NAVIGATION = 0x08000000;
 
@@ -1392,6 +1521,7 @@ public interface WindowManager extends ViewManager {
          *
          * {@hide}
          */
+        @UnsupportedAppUsage
         public static final int FLAG_SLIPPERY = 0x20000000;
 
         /**
@@ -1561,6 +1691,7 @@ public interface WindowManager extends ViewManager {
          * to determine its default behavior.
          *
          * {@hide} */
+        @UnsupportedAppUsage
         public static final int PRIVATE_FLAG_SHOW_FOR_ALL_USERS = 0x00000010;
 
         /**
@@ -1653,7 +1784,7 @@ public interface WindowManager extends ViewManager {
          * what the other flags are.
          * @hide
          */
-        public static final int PRIVATE_FLAG_FORCE_DRAW_STATUS_BAR_BACKGROUND = 0x00020000;
+        public static final int PRIVATE_FLAG_FORCE_DRAW_BAR_BACKGROUNDS = 0x00020000;
 
         /**
          * Flag to indicate that this window needs Sustained Performance Mode if
@@ -1669,8 +1800,9 @@ public interface WindowManager extends ViewManager {
          * this window is visible.
          * @hide
          */
+        @SystemApi
         @RequiresPermission(permission.HIDE_NON_SYSTEM_OVERLAY_WINDOWS)
-        public static final int PRIVATE_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS = 0x00080000;
+        public static final int SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS = 0x00080000;
 
         /**
          * Indicates that this window is the rounded corners overlay present on some
@@ -1679,15 +1811,6 @@ public interface WindowManager extends ViewManager {
          * @hide
          */
         public static final int PRIVATE_FLAG_IS_ROUNDED_CORNERS_OVERLAY = 0x00100000;
-
-        /**
-         * If this flag is set on the window, window manager will acquire a sleep token that puts
-         * all activities to sleep as long as this window is visible. When this flag is set, the
-         * window needs to occlude all activity windows.
-         * @hide
-         */
-        @RequiresPermission(permission.DEVICE_POWER)
-        public static final int PRIVATE_FLAG_ACQUIRES_SLEEP_TOKEN = 0x00200000;
 
         /**
          * Flag to indicate that this window should be considered a screen decoration similar to the
@@ -1699,13 +1822,38 @@ public interface WindowManager extends ViewManager {
         public static final int PRIVATE_FLAG_IS_SCREEN_DECOR = 0x00400000;
 
         /**
-         * Flag to indicate that the status bar window is now in an explicit expanded state, meaning
-         * that status bar will not be hidden by any window with flag {@link #FLAG_FULLSCREEN} or
-         * {@link View#SYSTEM_UI_FLAG_FULLSCREEN} set.
-         * This can only be set by {@link LayoutParams#TYPE_STATUS_BAR}.
+         * Flag to indicate that the status bar window is in a state such that it forces showing
+         * the navigation bar unless the navigation bar window is explicitly set to
+         * {@link View#GONE}.
+         * It only takes effects if this is set by {@link LayoutParams#TYPE_STATUS_BAR}.
          * @hide
          */
-        public static final int PRIVATE_FLAG_STATUS_BAR_EXPANDED = 0x00800000;
+        public static final int PRIVATE_FLAG_STATUS_FORCE_SHOW_NAVIGATION = 0x00800000;
+
+        /**
+         * Flag to indicate that the window is color space agnostic, and the color can be
+         * interpreted to any color space.
+         * @hide
+         */
+        public static final int PRIVATE_FLAG_COLOR_SPACE_AGNOSTIC = 0x01000000;
+
+        /**
+         * Window flag: Overrides default power key behavior
+         * @hide
+         */
+        public static final int PRIVATE_FLAG_PREVENT_POWER_KEY = 0x20000000;
+
+        /**
+         * An internal annotation for flags that can be specified to {@link #softInputMode}.
+         *
+         * @hide
+         */
+        @SystemApi
+        @Retention(RetentionPolicy.SOURCE)
+        @IntDef(flag = true, prefix = { "SYSTEM_FLAG_" }, value = {
+                SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS,
+        })
+        public @interface SystemFlags {}
 
         /**
          * Control flags that are private to the platform.
@@ -1773,33 +1921,33 @@ public interface WindowManager extends ViewManager {
                         equals = PRIVATE_FLAG_LAYOUT_CHILD_WINDOW_IN_PARENT_FRAME,
                         name = "LAYOUT_CHILD_WINDOW_IN_PARENT_FRAME"),
                 @ViewDebug.FlagToString(
-                        mask = PRIVATE_FLAG_FORCE_DRAW_STATUS_BAR_BACKGROUND,
-                        equals = PRIVATE_FLAG_FORCE_DRAW_STATUS_BAR_BACKGROUND,
+                        mask = PRIVATE_FLAG_FORCE_DRAW_BAR_BACKGROUNDS,
+                        equals = PRIVATE_FLAG_FORCE_DRAW_BAR_BACKGROUNDS,
                         name = "FORCE_DRAW_STATUS_BAR_BACKGROUND"),
                 @ViewDebug.FlagToString(
                         mask = PRIVATE_FLAG_SUSTAINED_PERFORMANCE_MODE,
                         equals = PRIVATE_FLAG_SUSTAINED_PERFORMANCE_MODE,
                         name = "SUSTAINED_PERFORMANCE_MODE"),
                 @ViewDebug.FlagToString(
-                        mask = PRIVATE_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS,
-                        equals = PRIVATE_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS,
+                        mask = SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS,
+                        equals = SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS,
                         name = "HIDE_NON_SYSTEM_OVERLAY_WINDOWS"),
                 @ViewDebug.FlagToString(
                         mask = PRIVATE_FLAG_IS_ROUNDED_CORNERS_OVERLAY,
                         equals = PRIVATE_FLAG_IS_ROUNDED_CORNERS_OVERLAY,
                         name = "IS_ROUNDED_CORNERS_OVERLAY"),
                 @ViewDebug.FlagToString(
-                        mask = PRIVATE_FLAG_ACQUIRES_SLEEP_TOKEN,
-                        equals = PRIVATE_FLAG_ACQUIRES_SLEEP_TOKEN,
-                        name = "ACQUIRES_SLEEP_TOKEN"),
-                @ViewDebug.FlagToString(
                         mask = PRIVATE_FLAG_IS_SCREEN_DECOR,
                         equals = PRIVATE_FLAG_IS_SCREEN_DECOR,
                         name = "IS_SCREEN_DECOR"),
                 @ViewDebug.FlagToString(
-                        mask = PRIVATE_FLAG_STATUS_BAR_EXPANDED,
-                        equals = PRIVATE_FLAG_STATUS_BAR_EXPANDED,
-                        name = "STATUS_BAR_EXPANDED")
+                        mask = PRIVATE_FLAG_STATUS_FORCE_SHOW_NAVIGATION,
+                        equals = PRIVATE_FLAG_STATUS_FORCE_SHOW_NAVIGATION,
+                        name = "STATUS_FORCE_SHOW_NAVIGATION"),
+                @ViewDebug.FlagToString(
+                        mask = PRIVATE_FLAG_COLOR_SPACE_AGNOSTIC,
+                        equals = PRIVATE_FLAG_COLOR_SPACE_AGNOSTIC,
+                        name = "COLOR_SPACE_AGNOSTIC")
         })
         @TestApi
         public int privateFlags;
@@ -1820,6 +1968,7 @@ public interface WindowManager extends ViewManager {
          *
          * @hide
          */
+        @UnsupportedAppUsage
         public static final int NEEDS_MENU_SET_TRUE = 1;
 
         /**
@@ -1828,6 +1977,7 @@ public interface WindowManager extends ViewManager {
          *
          * @hide
          */
+        @UnsupportedAppUsage
         public static final int NEEDS_MENU_SET_FALSE = 2;
 
         /**
@@ -1841,6 +1991,7 @@ public interface WindowManager extends ViewManager {
          *
          * {@hide}
          */
+        @UnsupportedAppUsage
         public int needsMenuKey = NEEDS_MENU_UNSET;
 
         /**
@@ -2245,6 +2396,7 @@ public interface WindowManager extends ViewManager {
          * The ui visibility as requested by the views in this hierarchy.
          * the combined value should be systemUiVisibility | subtreeSystemUiVisibility.
          */
+        @UnsupportedAppUsage
         public int subtreeSystemUiVisibility;
 
         /**
@@ -2254,6 +2406,7 @@ public interface WindowManager extends ViewManager {
          *
          * @hide
          */
+        @UnsupportedAppUsage
         public boolean hasSystemUiListeners;
 
 
@@ -2405,6 +2558,7 @@ public interface WindowManager extends ViewManager {
          *
          * @hide
          */
+        @UnsupportedAppUsage
         public static final int INPUT_FEATURE_DISABLE_USER_ACTIVITY = 0x00000004;
 
         /**
@@ -2415,6 +2569,7 @@ public interface WindowManager extends ViewManager {
          * @see #INPUT_FEATURE_DISABLE_USER_ACTIVITY
          * @hide
          */
+        @UnsupportedAppUsage
         public int inputFeatures;
 
         /**
@@ -2430,6 +2585,7 @@ public interface WindowManager extends ViewManager {
          *
          * @hide
          */
+        @UnsupportedAppUsage
         public long userActivityTimeout = -1;
 
         /**
@@ -2461,6 +2617,7 @@ public interface WindowManager extends ViewManager {
          *
          * @hide
          */
+        @UnsupportedAppUsage
         public long hideTimeoutMilliseconds = -1;
 
         /**
@@ -2638,7 +2795,7 @@ public interface WindowManager extends ViewManager {
             out.writeLong(hideTimeoutMilliseconds);
         }
 
-        public static final Parcelable.Creator<LayoutParams> CREATOR
+        public static final @android.annotation.NonNull Parcelable.Creator<LayoutParams> CREATOR
                     = new Parcelable.Creator<LayoutParams>() {
             public LayoutParams createFromParcel(Parcel in) {
                 return new LayoutParams(in);
@@ -3131,6 +3288,7 @@ public interface WindowManager extends ViewManager {
          * Backup the layout parameters used in compatibility mode.
          * @see LayoutParams#restore()
          */
+        @UnsupportedAppUsage
         void backup() {
             int[] backup = mCompatibilityParamsBackup;
             if (backup == null) {
@@ -3147,6 +3305,7 @@ public interface WindowManager extends ViewManager {
          * Restore the layout params' coordinates, size and gravity
          * @see LayoutParams#backup()
          */
+        @UnsupportedAppUsage
         void restore() {
             int[] backup = mCompatibilityParamsBackup;
             if (backup != null) {

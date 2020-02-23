@@ -1,5 +1,12 @@
 package com.android.systemui.statusbar.policy;
 
+import static junit.framework.Assert.assertEquals;
+
+import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.anyBoolean;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
 import android.content.Intent;
 import android.net.NetworkCapabilities;
 import android.net.NetworkInfo;
@@ -15,13 +22,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
-
-import static junit.framework.Assert.assertEquals;
-
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyBoolean;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 @SmallTest
 @RunWith(AndroidTestingRunner.class)
@@ -87,15 +87,15 @@ public class NetworkControllerWifiTest extends NetworkControllerBaseTest {
                 WifiIcons.QS_WIFI_SIGNAL_STRENGTH[1][testLevel], testSsid);
 
         // Set to different activity state first to ensure a callback happens.
-        setWifiActivity(WifiManager.DATA_ACTIVITY_IN);
+        setWifiActivity(WifiManager.TrafficStateCallback.DATA_ACTIVITY_IN);
 
-        setWifiActivity(WifiManager.DATA_ACTIVITY_NONE);
+        setWifiActivity(WifiManager.TrafficStateCallback.DATA_ACTIVITY_NONE);
         verifyLastQsDataDirection(false, false);
-        setWifiActivity(WifiManager.DATA_ACTIVITY_IN);
+        setWifiActivity(WifiManager.TrafficStateCallback.DATA_ACTIVITY_IN);
         verifyLastQsDataDirection(true, false);
-        setWifiActivity(WifiManager.DATA_ACTIVITY_OUT);
+        setWifiActivity(WifiManager.TrafficStateCallback.DATA_ACTIVITY_OUT);
         verifyLastQsDataDirection(false, true);
-        setWifiActivity(WifiManager.DATA_ACTIVITY_INOUT);
+        setWifiActivity(WifiManager.TrafficStateCallback.DATA_ACTIVITY_INOUT);
         verifyLastQsDataDirection(true, true);
     }
 

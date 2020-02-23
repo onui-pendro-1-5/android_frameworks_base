@@ -24,6 +24,8 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.res.Configuration;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Process;
 import android.os.SystemProperties;
 import android.os.Trace;
@@ -34,9 +36,10 @@ import android.util.TimingsTraceLog;
 
 import com.android.systemui.plugins.OverlayPlugin;
 import com.android.systemui.plugins.PluginListener;
-import com.android.systemui.plugins.PluginManager;
+import com.android.systemui.shared.plugins.PluginManager;
+import com.android.systemui.statusbar.phone.DozeParameters;
 import com.android.systemui.statusbar.phone.StatusBar;
-import com.android.systemui.statusbar.phone.StatusBarWindowManager;
+import com.android.systemui.statusbar.phone.StatusBarWindowController;
 import com.android.systemui.util.NotificationChannels;
 
 import java.util.HashMap;
@@ -57,16 +60,29 @@ public class SystemUIApplication extends Application implements SysUiServiceProv
     private boolean mServicesStarted;
     private boolean mBootCompleted;
     private final Map<Class<?>, Object> mComponents = new HashMap<>();
+    private ContextAvailableCallback mContextAvailableCallback;
+
+    public SystemUIApplication() {
+        super();
+        Log.v(TAG, "SystemUIApplication constructed.");
+    }
 
     @Override
     public void onCreate() {
         super.onCreate();
+        Log.v(TAG, "SystemUIApplication created.");
+        // This line is used to setup Dagger's dependency injection and should be kept at the
+        // top of this method.
+        TimingsTraceLog log = new TimingsTraceLog("SystemUIBootTiming",
+                Trace.TRACE_TAG_APP);
+        log.traceBegin("DependencyInjection");
+        mContextAvailableCallback.onContextAvailable(this);
+        log.traceEnd();
+
         // Set the application theme that is inherited by all services. Note that setting the
         // application theme in the manifest does only work for activities. Keep this in sync with
         // the theme set there.
         setTheme(R.style.Theme_SystemUI);
-
-        SystemUIFactory.createFromConfig(this);
 
         if (Process.myUserHandle().equals(UserHandle.SYSTEM)) {
             IntentFilter bootCompletedFilter = new IntentFilter(Intent.ACTION_BOOT_COMPLETED);
@@ -131,7 +147,7 @@ public class SystemUIApplication extends Application implements SysUiServiceProv
 
     /**
      * Ensures that all the Secondary user SystemUI services are running. If they are already
-     * running, this is a no-op. This is needed to conditinally start all the services, as we only
+     * running, this is a no-op. This is needed to conditionally start all the services, as we only
      * need to have it in the main process.
      * <p>This method must only be called from the main thread.</p>
      */
@@ -152,7 +168,9 @@ public class SystemUIApplication extends Application implements SysUiServiceProv
             // see ActivityManagerService.finishBooting()
             if ("1".equals(SystemProperties.get("sys.boot_completed"))) {
                 mBootCompleted = true;
-                if (DEBUG) Log.v(TAG, "BOOT_COMPLETED was already sent");
+                if (DEBUG) {
+                    Log.v(TAG, "BOOT_COMPLETED was already sent");
+                }
             }
         }
 
@@ -170,7 +188,11 @@ public class SystemUIApplication extends Application implements SysUiServiceProv
             Class cls;
             try {
                 cls = Class.forName(clsName);
-                mServices[i] = (SystemUI) cls.newInstance();
+                Object o = cls.newInstance();
+                if (o instanceof SystemUI.Injector) {
+                    o = ((SystemUI.Injector) o).apply(this);
+                }
+                mServices[i] = (SystemUI) o;
             } catch(ClassNotFoundException ex){
                 throw new RuntimeException(ex);
             } catch (IllegalAccessException ex) {
@@ -194,35 +216,65 @@ public class SystemUIApplication extends Application implements SysUiServiceProv
                 mServices[i].onBootCompleted();
             }
         }
+        Dependency.get(InitController.class).executePostInitTasks();
         log.traceEnd();
+        final Handler mainHandler = new Handler(Looper.getMainLooper());
         Dependency.get(PluginManager.class).addPluginListener(
                 new PluginListener<OverlayPlugin>() {
-                    private ArraySet<OverlayPlugin> mOverlays;
+                    private ArraySet<OverlayPlugin> mOverlays = new ArraySet<>();
 
                     @Override
                     public void onPluginConnected(OverlayPlugin plugin, Context pluginContext) {
-                        StatusBar statusBar = getComponent(StatusBar.class);
-                        if (statusBar != null) {
-                            plugin.setup(statusBar.getStatusBarWindow(),
-                                    statusBar.getNavigationBarView());
-                        }
-                        // Lazy init.
-                        if (mOverlays == null) mOverlays = new ArraySet<>();
-                        if (plugin.holdStatusBarOpen()) {
-                            mOverlays.add(plugin);
-                            Dependency.get(StatusBarWindowManager.class).setStateListener(b ->
-                                    mOverlays.forEach(o -> o.setCollapseDesired(b)));
-                            Dependency.get(StatusBarWindowManager.class).setForcePluginOpen(
-                                    mOverlays.size() != 0);
-
-                        }
+                        mainHandler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                StatusBar statusBar = getComponent(StatusBar.class);
+                                if (statusBar != null) {
+                                    plugin.setup(statusBar.getStatusBarWindow(),
+                                            statusBar.getNavigationBarView(), new Callback(plugin),
+                                            DozeParameters.getInstance(getBaseContext()));
+                                }
+                            }
+                        });
                     }
 
                     @Override
                     public void onPluginDisconnected(OverlayPlugin plugin) {
-                        mOverlays.remove(plugin);
-                        Dependency.get(StatusBarWindowManager.class).setForcePluginOpen(
-                                mOverlays.size() != 0);
+                        mainHandler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                mOverlays.remove(plugin);
+                                Dependency.get(StatusBarWindowController.class).setForcePluginOpen(
+                                        mOverlays.size() != 0);
+                            }
+                        });
+                    }
+
+                    class Callback implements OverlayPlugin.Callback {
+                        private final OverlayPlugin mPlugin;
+
+                        Callback(OverlayPlugin plugin) {
+                            mPlugin = plugin;
+                        }
+
+                        @Override
+                        public void onHoldStatusBarOpenChange() {
+                            if (mPlugin.holdStatusBarOpen()) {
+                                mOverlays.add(mPlugin);
+                            } else {
+                                mOverlays.remove(mPlugin);
+                            }
+                            mainHandler.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    Dependency.get(StatusBarWindowController.class)
+                                            .setStateListener(b -> mOverlays.forEach(
+                                                    o -> o.setCollapseDesired(b)));
+                                    Dependency.get(StatusBarWindowController.class)
+                                            .setForcePluginOpen(mOverlays.size() != 0);
+                                }
+                            });
+                        }
                     }
                 }, OverlayPlugin.class, true /* Allow multiple plugins */);
 
@@ -232,6 +284,7 @@ public class SystemUIApplication extends Application implements SysUiServiceProv
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         if (mServicesStarted) {
+            Dependency.staticOnConfigurationChanged(newConfig);
             int len = mServices.length;
             for (int i = 0; i < len; i++) {
                 if (mServices[i] != null) {
@@ -248,5 +301,13 @@ public class SystemUIApplication extends Application implements SysUiServiceProv
 
     public SystemUI[] getServices() {
         return mServices;
+    }
+
+    void setContextAvailableCallback(ContextAvailableCallback callback) {
+        mContextAvailableCallback = callback;
+    }
+
+    interface ContextAvailableCallback {
+        void onContextAvailable(Context context);
     }
 }

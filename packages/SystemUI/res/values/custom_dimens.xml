@@ -16,29 +16,22 @@
 */
 -->
 <resources>
-    <!-- OPA home dimens -->
-    <dimen name="halo_inner_radius">10.0dip</dimen>
-    <dimen name="halo_thickness">1.0dip</dimen>
-    <dimen name="halo_diameter">22.0dip</dimen>
-    <dimen name="opa_dot_diam">10.0dip</dimen>
-    <dimen name="opa_diamond_translation">16.0dip</dimen>
-    <dimen name="opa_line_y_translation">16.0dip</dimen>
-    <dimen name="opa_line_x_trans_ry">15.0dip</dimen>
-    <dimen name="opa_line_x_trans_bg">30.0dip</dimen>
-    <dimen name="opa_line_x_collapse_bg">46.0dip</dimen>
-    <dimen name="opa_line_x_collapse_ry">15.0dip</dimen>
-    <dimen name="opa_overshoot_translation">8.0dip</dimen>
-    <dimen name="opa_return_translation">-1.0dip</dimen>
-    <dimen name="opa_rest_to_collapse">7.0dip</dimen>
 
-    <!-- Width of the battery icon (with percentage inside) in the status bar. -->
-    <dimen name="status_bar_battery_icon_width_percentage_inside">10.5dp</dimen>
+    <!-- Bottom margin size when fingerprint in display is active -->
+    <dimen name="keyguard_indication_margin_bottom_fingerprint_in_display">@dimen/keyguard_indication_margin_bottom</dimen>
 
-    <!-- Ambient indication -->
-    <dimen name="ambient_indication_icon_size">20.0dip</dimen>
-    <dimen name="ambient_indication_margin_bottom">12.0dip</dimen>
+    <!-- Custom padding size on biometric dialog -->
+    <dimen name="fp_dialog_error_padding_top">16dp</dimen>
+    <dimen name="fp_dialog_error_padding_bottom">24dp</dimen>
 
-    <!-- Network traffic -->
-    <dimen name="net_traffic_text_size">8.8dip</dimen>
+    <!-- Custom padding size on biometric dialog when fingerprint in display is active -->
+    <dimen name="fp_dialog_error_padding_top_fingerprint_in_display">@dimen/fp_dialog_error_padding_top</dimen>
+    <dimen name="fp_dialog_error_padding_bottom_fingerprint_in_display">72dp</dimen>
+
+    <!-- Custom cutout overlay view sizes -->
+    <dimen name="config_customCutoutTopWidth">0.0px</dimen>
+    <dimen name="config_customCutoutTopHeight">0.0px</dimen>
+    <dimen name="config_customCutoutBottomWidth">0.0px</dimen>
+    <dimen name="config_customCutoutBottomHeight">0.0px</dimen>
 
 </resources>

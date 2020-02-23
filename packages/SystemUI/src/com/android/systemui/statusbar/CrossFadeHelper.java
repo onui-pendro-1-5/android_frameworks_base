@@ -19,13 +19,18 @@ package com.android.systemui.statusbar;
 import android.view.View;
 
 import com.android.systemui.Interpolators;
-import com.android.systemui.statusbar.stack.StackStateAnimator;
+import com.android.systemui.R;
+import com.android.systemui.statusbar.notification.stack.StackStateAnimator;
 
 /**
  * A helper to fade views in and out.
  */
 public class CrossFadeHelper {
     public static final long ANIMATION_DURATION_LENGTH = 210;
+
+    public static void fadeOut(final View view) {
+        fadeOut(view, null);
+    }
 
     public static void fadeOut(final View view, final Runnable endRunnable) {
         fadeOut(view, ANIMATION_DURATION_LENGTH, 0, endRunnable);
@@ -92,9 +97,15 @@ public class CrossFadeHelper {
 
     private static void updateLayerType(View view, float alpha) {
         if (view.hasOverlappingRendering() && alpha > 0.0f && alpha < 1.0f) {
-            view.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-        } else if (view.getLayerType() == View.LAYER_TYPE_HARDWARE) {
-            view.setLayerType(View.LAYER_TYPE_NONE, null);
+            if (view.getLayerType() != View.LAYER_TYPE_HARDWARE) {
+                view.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                view.setTag(R.id.cross_fade_layer_type_changed_tag, true);
+            }
+        } else if (view.getLayerType() == View.LAYER_TYPE_HARDWARE
+                && view.getTag(R.id.cross_fade_layer_type_changed_tag) != null) {
+            if (view.getTag(R.id.cross_fade_layer_type_changed_tag) != null) {
+                view.setLayerType(View.LAYER_TYPE_NONE, null);
+            }
         }
     }
 
@@ -114,7 +125,7 @@ public class CrossFadeHelper {
                 .setStartDelay(delay)
                 .setInterpolator(Interpolators.ALPHA_IN)
                 .withEndAction(null);
-        if (view.hasOverlappingRendering()) {
+        if (view.hasOverlappingRendering() && view.getLayerType() != View.LAYER_TYPE_HARDWARE) {
             view.animate().withLayer();
         }
     }

@@ -50,19 +50,24 @@ import com.android.systemui.BatteryMeterView;
 import com.android.systemui.Dependency;
 import com.android.systemui.Interpolators;
 import com.android.systemui.R;
+import com.android.systemui.plugins.DarkIconDispatcher.DarkReceiver;
 import com.android.systemui.qs.QSPanel;
 import com.android.systemui.statusbar.phone.StatusBarIconController.TintedIconManager;
 import com.android.systemui.statusbar.policy.BatteryController;
 import com.android.systemui.statusbar.policy.BatteryController.BatteryStateChangeCallback;
 import com.android.systemui.statusbar.policy.ConfigurationController;
 import com.android.systemui.statusbar.policy.ConfigurationController.ConfigurationListener;
-import com.android.systemui.statusbar.policy.DarkIconDispatcher.DarkReceiver;
 import com.android.systemui.statusbar.policy.KeyguardUserSwitcher;
 import com.android.systemui.statusbar.policy.UserInfoController;
 import com.android.systemui.statusbar.policy.UserInfoController.OnUserInfoChangedListener;
 import com.android.systemui.statusbar.policy.UserInfoControllerImpl;
 import com.android.systemui.statusbar.policy.UserSwitcherController;
 import com.android.systemui.util.leak.RotationUtils;
+
+import java.io.FileDescriptor;
+import java.io.PrintWriter;
+
+import com.android.internal.util.custom.cutout.CutoutUtils;
 
 /**
  * The header group on Keyguard.
@@ -74,6 +79,8 @@ public class KeyguardStatusBarView extends RelativeLayout
     private static final int LAYOUT_CUTOUT = 1;
     private static final int LAYOUT_NO_CUTOUT = 2;
 
+    private final Rect mEmptyRect = new Rect(0, 0, 0, 0);
+
     private boolean mShowPercentAvailable;
     private boolean mShowPercentInsideIcon;
     private boolean mShouldEnablePercentInsideIcon;
@@ -82,10 +89,10 @@ public class KeyguardStatusBarView extends RelativeLayout
     private boolean mBatteryListening;
 
     private TextView mCarrierLabel;
-    private View mSystemIconsSuperContainer;
     private MultiUserSwitch mMultiUserSwitch;
     private ImageView mMultiUserAvatar;
     private BatteryMeterView mBatteryView;
+    private StatusIconContainer mStatusIconContainer;
 
     private BatteryController mBatteryController;
     private KeyguardUserSwitcher mKeyguardUserSwitcher;
@@ -108,7 +115,8 @@ public class KeyguardStatusBarView extends RelativeLayout
      */
     private int mCutoutSideNudge = 0;
 
-    private int mCurrentOrientation = -1;
+    // Cutout
+    private boolean mHasBigCutout;
 
     public KeyguardStatusBarView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -124,6 +132,7 @@ public class KeyguardStatusBarView extends RelativeLayout
         mBatteryView = mSystemIconsContainer.findViewById(R.id.battery);
         mCutoutSpace = findViewById(R.id.cutout_space_view);
         mStatusIconArea = findViewById(R.id.status_icon_area);
+        mStatusIconContainer = findViewById(R.id.statusIcons);
 
         loadDimens();
         updateUserSwitcher();
@@ -154,10 +163,6 @@ public class KeyguardStatusBarView extends RelativeLayout
         lp.setMarginStart(getResources().getDimensionPixelSize(
                 R.dimen.system_icons_super_container_margin_start));
         mSystemIconsContainer.setLayoutParams(lp);
-        mSystemIconsContainer.setPaddingRelative(mSystemIconsContainer.getPaddingStart(),
-                mSystemIconsContainer.getPaddingTop(),
-                getResources().getDimensionPixelSize(R.dimen.system_icons_keyguard_padding_end),
-                mSystemIconsContainer.getPaddingBottom());
 
         // Respect font size setting.
         mCarrierLabel.setTextSize(TypedValue.COMPLEX_UNIT_PX,
@@ -191,6 +196,7 @@ public class KeyguardStatusBarView extends RelativeLayout
                 R.dimen.system_icons_super_container_avatarless_margin_end);
         mCutoutSideNudge = getResources().getDimensionPixelSize(
                 R.dimen.display_cutout_margin_consumption);
+        mHasBigCutout = CutoutUtils.hasBigCutout(getContext());
         mShowPercentAvailable = getContext().getResources().getBoolean(
                 com.android.internal.R.bool.config_battery_percentage_setting_available);
         mShowPercentInsideIcon = getContext().getResources().getBoolean(
@@ -208,9 +214,9 @@ public class KeyguardStatusBarView extends RelativeLayout
         }
         if (mKeyguardUserSwitcher == null) {
             // If we have no keyguard switcher, the screen width is under 600dp. In this case,
-            // we don't show the multi-user avatar unless there is more than 1 user on the device.
-            if (mUserSwitcherController != null
-                    && mUserSwitcherController.getSwitchableUserCount() > 1) {
+            // we only show the multi-user switch if it's enabled through UserManager as well as
+            // by the user.
+            if (!mHasBigCutout && mMultiUserSwitch.isMultiUserEnabled()) {
                 mMultiUserSwitch.setVisibility(View.VISIBLE);
             } else {
                 mMultiUserSwitch.setVisibility(View.GONE);
@@ -472,21 +478,43 @@ public class KeyguardStatusBarView extends RelativeLayout
     }
 
     public void onThemeChanged() {
-        @ColorInt int textColor = Utils.getColorAttr(mContext, R.attr.wallpaperTextColor);
-        @ColorInt int iconColor = Utils.getDefaultColor(mContext, Color.luminance(textColor) < 0.5 ?
-                R.color.dark_mode_icon_color_single_tone :
-                R.color.light_mode_icon_color_single_tone);
-        float intensity = textColor == Color.WHITE ? 0 : 1;
-        mCarrierLabel.setTextColor(iconColor);
-        mBatteryView.setFillColor(iconColor);
-        mIconManager.setTint(iconColor);
-        Rect tintArea = new Rect(0, 0, 0, 0);
-
-        applyDarkness(R.id.battery, tintArea, intensity, iconColor);
-        applyDarkness(R.id.clock, tintArea, intensity, iconColor);
+        mBatteryView.setColorsFromContext(mContext);
+        updateIconsAndTextColors();
         // Reload user avatar
         ((UserInfoControllerImpl) Dependency.get(UserInfoController.class))
                 .onDensityOrFontScaleChanged();
+    }
+
+    @Override
+    public void onDensityOrFontScaleChanged() {
+        loadDimens();
+    }
+
+    @Override
+    public void onOverlayChanged() {
+        mHasBigCutout = CutoutUtils.hasBigCutout(getContext());
+        mShowPercentAvailable = getContext().getResources().getBoolean(
+                com.android.internal.R.bool.config_battery_percentage_setting_available);
+        mCarrierLabel.setTextAppearance(
+                Utils.getThemeAttr(mContext, com.android.internal.R.attr.textAppearanceSmall));
+        onThemeChanged();
+        mBatteryView.updatePercentView();
+    }
+
+    private void updateIconsAndTextColors() {
+        @ColorInt int textColor = Utils.getColorAttrDefaultColor(mContext,
+                R.attr.wallpaperTextColor);
+        @ColorInt int iconColor = Utils.getColorStateListDefaultColor(mContext,
+                Color.luminance(textColor) < 0.5 ? R.color.dark_mode_icon_color_single_tone :
+                R.color.light_mode_icon_color_single_tone);
+        float intensity = textColor == Color.WHITE ? 0 : 1;
+        mCarrierLabel.setTextColor(iconColor);
+        if (mIconManager != null) {
+            mIconManager.setTint(iconColor);
+        }
+
+        applyDarkness(R.id.battery, mEmptyRect, intensity, iconColor);
+        applyDarkness(R.id.clock, mEmptyRect, intensity, iconColor);
     }
 
     private void applyDarkness(int id, Rect tintArea, float intensity, int color) {
@@ -496,32 +524,14 @@ public class KeyguardStatusBarView extends RelativeLayout
         }
     }
 
-    private class CustomSettingsObserver extends ContentObserver {
-        CustomSettingsObserver(Handler handler) {
-            super(handler);
+    public void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
+        pw.println("KeyguardStatusBarView:");
+        pw.println("  mBatteryCharging: " + mBatteryCharging);
+        pw.println("  mKeyguardUserSwitcherShowing: " + mKeyguardUserSwitcherShowing);
+        pw.println("  mBatteryListening: " + mBatteryListening);
+        pw.println("  mLayoutState: " + mLayoutState);
+        if (mBatteryView != null) {
+            mBatteryView.dump(fd, pw, args);
         }
-
-        void observe() {
-            ContentResolver resolver = mContext.getContentResolver();
-            resolver.registerContentObserver(Settings.System.getUriFor(
-                    Settings.System.DISPLAY_CUTOUT_HIDDEN), false, this);
-        }
-
-        @Override
-        public void onChange(boolean selfChange, Uri uri) {
-            if (uri.equals(Settings.System.getUriFor(Settings.System.DISPLAY_CUTOUT_HIDDEN))) {
-                updateCutout();
-            }
-        }
-
-        @Override
-        public void onChange(boolean selfChange) {
-            updateCutout();
-        }
-    }
-
-    private void updateCutout() {
-        mDisplayCutoutHidden = Settings.System.getIntForUser(mContext.getContentResolver(),
-            Settings.System.DISPLAY_CUTOUT_HIDDEN, 0, UserHandle.USER_CURRENT) == 1;
     }
 }

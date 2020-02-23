@@ -22,8 +22,9 @@ namespace android {
 
 class DisplayEventDispatcher : public LooperCallback {
 public:
-    DisplayEventDispatcher(const sp<Looper>& looper,
-            ISurfaceComposer::VsyncSource vsyncSource = ISurfaceComposer::eVsyncSourceApp);
+    explicit DisplayEventDispatcher(const sp<Looper>& looper,
+            ISurfaceComposer::VsyncSource vsyncSource = ISurfaceComposer::eVsyncSourceApp,
+            ISurfaceComposer::ConfigChanged configChanged = ISurfaceComposer::eConfigChangedSuppress);
 
     status_t initialize();
     void dispose();
@@ -37,10 +38,14 @@ private:
     DisplayEventReceiver mReceiver;
     bool mWaitingForVsync;
 
-    virtual void dispatchVsync(nsecs_t timestamp, int32_t id, uint32_t count) = 0;
-    virtual void dispatchHotplug(nsecs_t timestamp, int32_t id, bool connected) = 0;
+    virtual void dispatchVsync(nsecs_t timestamp, PhysicalDisplayId displayId, uint32_t count) = 0;
+    virtual void dispatchHotplug(nsecs_t timestamp, PhysicalDisplayId displayId,
+                                 bool connected) = 0;
+    virtual void dispatchConfigChanged(nsecs_t timestamp, PhysicalDisplayId displayId,
+                                       int32_t configId) = 0;
 
     virtual int handleEvent(int receiveFd, int events, void* data);
-    bool processPendingEvents(nsecs_t* outTimestamp, int32_t* id, uint32_t* outCount);
+    bool processPendingEvents(nsecs_t* outTimestamp, PhysicalDisplayId* outDisplayId,
+                              uint32_t* outCount);
 };
 }

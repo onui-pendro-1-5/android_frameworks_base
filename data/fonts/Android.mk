@@ -89,27 +89,7 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE := fonts.xml
 LOCAL_MODULE_CLASS := ETC
-
-ifneq ($(filter true,$(EXCLUDE_SERIF_FONTS) $(SMALLER_FONT_FOOTPRINT)),)
-AOSP_FONTS_FILE := frameworks/base/data/fonts/fonts_no_serif.xml
-else
-AOSP_FONTS_FILE := frameworks/base/data/fonts/fonts.xml
-endif
-
-ifdef ADDITIONAL_FONTS_FILE
-ADDITIONAL_FONTS_SCRIPT := frameworks/base/tools/fonts/add_additional_fonts.py
-ADD_ADDITIONAL_FONTS := $(local-generated-sources-dir)/fonts.xml
-
-$(ADD_ADDITIONAL_FONTS): PRIVATE_SCRIPT := $(ADDITIONAL_FONTS_SCRIPT)
-$(ADD_ADDITIONAL_FONTS): PRIVATE_ADDITIONAL_FONTS_FILE := $(ADDITIONAL_FONTS_FILE)
-$(ADD_ADDITIONAL_FONTS): $(ADDITIONAL_FONTS_SCRIPT) $(AOSP_FONTS_FILE) $(ADDITIONAL_FONTS_FILE)
-	rm -f $@
-	python $(PRIVATE_SCRIPT) $@ $(PRIVATE_ADDITIONAL_FONTS_FILE)
-else
-ADD_ADDITIONAL_FONTS := $(AOSP_FONTS_FILE)
-endif
-
-LOCAL_PREBUILT_MODULE_FILE := $(ADD_ADDITIONAL_FONTS)
+LOCAL_PREBUILT_MODULE_FILE := frameworks/base/data/fonts/fonts.xml
 
 include $(BUILD_PREBUILT)
 

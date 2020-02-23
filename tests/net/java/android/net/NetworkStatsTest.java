@@ -19,6 +19,7 @@ package android.net;
 import static android.net.NetworkStats.DEFAULT_NETWORK_ALL;
 import static android.net.NetworkStats.DEFAULT_NETWORK_NO;
 import static android.net.NetworkStats.DEFAULT_NETWORK_YES;
+import static android.net.NetworkStats.IFACE_ALL;
 import static android.net.NetworkStats.INTERFACES_ALL;
 import static android.net.NetworkStats.METERED_ALL;
 import static android.net.NetworkStats.METERED_NO;
@@ -26,31 +27,30 @@ import static android.net.NetworkStats.METERED_YES;
 import static android.net.NetworkStats.ROAMING_ALL;
 import static android.net.NetworkStats.ROAMING_NO;
 import static android.net.NetworkStats.ROAMING_YES;
-import static android.net.NetworkStats.SET_DEFAULT;
-import static android.net.NetworkStats.SET_FOREGROUND;
+import static android.net.NetworkStats.SET_ALL;
 import static android.net.NetworkStats.SET_DBG_VPN_IN;
 import static android.net.NetworkStats.SET_DBG_VPN_OUT;
-import static android.net.NetworkStats.SET_ALL;
-import static android.net.NetworkStats.IFACE_ALL;
+import static android.net.NetworkStats.SET_DEFAULT;
+import static android.net.NetworkStats.SET_FOREGROUND;
 import static android.net.NetworkStats.TAG_ALL;
 import static android.net.NetworkStats.TAG_NONE;
 import static android.net.NetworkStats.UID_ALL;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
-import android.net.NetworkStats.Entry;
 import android.os.Process;
-import android.support.test.runner.AndroidJUnit4;
-import android.support.test.filters.SmallTest;
 import android.util.ArrayMap;
+
+import androidx.test.filters.SmallTest;
+import androidx.test.runner.AndroidJUnit4;
 
 import com.google.android.collect.Sets;
 
-import java.util.HashSet;
-
-import org.junit.runner.RunWith;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+
+import java.util.HashSet;
 
 @RunWith(AndroidJUnit4.class)
 @SmallTest
@@ -448,22 +448,58 @@ public class NetworkStatsTest {
     }
 
     @Test
-    public void testWithoutUid() throws Exception {
-        final NetworkStats before = new NetworkStats(TEST_START, 3)
-                .addValues(TEST_IFACE, 100, SET_DEFAULT, TAG_NONE, 128L, 8L, 0L, 2L, 20L)
-                .addValues(TEST_IFACE2, 100, SET_DEFAULT, TAG_NONE, 512L, 32L, 0L, 0L, 0L)
-                .addValues(TEST_IFACE2, 100, SET_DEFAULT, 0xF00D, 64L, 4L, 0L, 0L, 0L)
-                .addValues(TEST_IFACE2, 100, SET_FOREGROUND, TAG_NONE, 512L, 32L, 0L, 0L, 0L)
-                .addValues(TEST_IFACE, 101, SET_DEFAULT, TAG_NONE, 128L, 8L, 0L, 0L, 0L)
-                .addValues(TEST_IFACE, 101, SET_DEFAULT, 0xF00D, 128L, 8L, 0L, 0L, 0L);
+    public void testRemoveUids() throws Exception {
+        final NetworkStats before = new NetworkStats(TEST_START, 3);
 
-        final NetworkStats after = before.withoutUids(new int[] { 100 });
-        assertEquals(6, before.size());
-        assertEquals(2, after.size());
-        assertValues(after, 0, TEST_IFACE, 101, SET_DEFAULT, TAG_NONE, METERED_NO, ROAMING_NO,
-                DEFAULT_NETWORK_NO, 128L, 8L, 0L, 0L, 0L);
-        assertValues(after, 1, TEST_IFACE, 101, SET_DEFAULT, 0xF00D, METERED_NO, ROAMING_NO,
-                DEFAULT_NETWORK_NO, 128L, 8L, 0L, 0L, 0L);
+        // Test 0 item stats.
+        NetworkStats after = before.clone();
+        after.removeUids(new int[0]);
+        assertEquals(0, after.size());
+        after.removeUids(new int[] {100});
+        assertEquals(0, after.size());
+
+        // Test 1 item stats.
+        before.addValues(TEST_IFACE, 99, SET_DEFAULT, TAG_NONE, 1L, 128L, 0L, 2L, 20L);
+        after = before.clone();
+        after.removeUids(new int[0]);
+        assertEquals(1, after.size());
+        assertValues(after, 0, TEST_IFACE, 99, SET_DEFAULT, TAG_NONE, METERED_NO, ROAMING_NO,
+                DEFAULT_NETWORK_NO, 1L, 128L, 0L, 2L, 20L);
+        after.removeUids(new int[] {99});
+        assertEquals(0, after.size());
+
+        // Append remaining test items.
+        before.addValues(TEST_IFACE, 100, SET_DEFAULT, TAG_NONE, 2L, 64L, 0L, 2L, 20L)
+                .addValues(TEST_IFACE2, 100, SET_DEFAULT, TAG_NONE, 4L, 32L, 0L, 0L, 0L)
+                .addValues(TEST_IFACE2, 100, SET_DEFAULT, 0xF00D, 8L, 16L, 0L, 0L, 0L)
+                .addValues(TEST_IFACE2, 100, SET_FOREGROUND, TAG_NONE, 16L, 8L, 0L, 0L, 0L)
+                .addValues(TEST_IFACE, 101, SET_DEFAULT, TAG_NONE, 32L, 4L, 0L, 0L, 0L)
+                .addValues(TEST_IFACE, 101, SET_DEFAULT, 0xF00D, 64L, 2L, 0L, 0L, 0L);
+        assertEquals(7, before.size());
+
+        // Test remove with empty uid list.
+        after = before.clone();
+        after.removeUids(new int[0]);
+        assertValues(after.getTotalIncludingTags(null), 127L, 254L, 0L, 4L, 40L);
+
+        // Test remove uids don't exist in stats.
+        after.removeUids(new int[] {98, 0, Integer.MIN_VALUE, Integer.MAX_VALUE});
+        assertValues(after.getTotalIncludingTags(null), 127L, 254L, 0L, 4L, 40L);
+
+        // Test remove all uids.
+        after.removeUids(new int[] {99, 100, 100, 101});
+        assertEquals(0, after.size());
+
+        // Test remove in the middle.
+        after = before.clone();
+        after.removeUids(new int[] {100});
+        assertEquals(3, after.size());
+        assertValues(after, 0, TEST_IFACE, 99, SET_DEFAULT, TAG_NONE, METERED_NO, ROAMING_NO,
+                DEFAULT_NETWORK_NO, 1L, 128L, 0L, 2L, 20L);
+        assertValues(after, 1, TEST_IFACE, 101, SET_DEFAULT, TAG_NONE, METERED_NO, ROAMING_NO,
+                DEFAULT_NETWORK_NO, 32L, 4L, 0L, 0L, 0L);
+        assertValues(after, 2, TEST_IFACE, 101, SET_DEFAULT, 0xF00D, METERED_NO, ROAMING_NO,
+                DEFAULT_NETWORK_NO, 64L, 2L, 0L, 0L, 0L);
     }
 
     @Test
@@ -533,7 +569,7 @@ public class NetworkStatsTest {
             .addValues(underlyingIface, tunUid, SET_FOREGROUND, TAG_NONE, METERED_NO, ROAMING_NO,
                     DEFAULT_NETWORK_NO, 0L, 0L, 0L, 0L, 0L);
 
-        assertTrue(delta.toString(), delta.migrateTun(tunUid, tunIface, underlyingIface));
+        delta.migrateTun(tunUid, tunIface, new String[] {underlyingIface});
         assertEquals(20, delta.size());
 
         // tunIface and TEST_IFACE entries are not changed.
@@ -614,7 +650,7 @@ public class NetworkStatsTest {
             .addValues(underlyingIface, tunUid, SET_DEFAULT, TAG_NONE, METERED_NO, ROAMING_NO,
                     DEFAULT_NETWORK_NO,  75500L, 37L, 130000L, 70L, 0L);
 
-        assertTrue(delta.migrateTun(tunUid, tunIface, underlyingIface));
+        delta.migrateTun(tunUid, tunIface, new String[]{underlyingIface});
         assertEquals(9, delta.size());
 
         // tunIface entries should not be changed.
@@ -777,6 +813,37 @@ public class NetworkStatsTest {
     }
 
     @Test
+    public void testFilterDebugEntries() {
+        NetworkStats.Entry entry1 = new NetworkStats.Entry(
+                "test1", 10100, SET_DEFAULT, TAG_NONE, METERED_NO, ROAMING_NO,
+                DEFAULT_NETWORK_NO, 50000L, 25L, 100000L, 50L, 0L);
+
+        NetworkStats.Entry entry2 = new NetworkStats.Entry(
+                "test2", 10101, SET_DBG_VPN_IN, TAG_NONE, METERED_NO, ROAMING_NO,
+                DEFAULT_NETWORK_NO, 50000L, 25L, 100000L, 50L, 0L);
+
+        NetworkStats.Entry entry3 = new NetworkStats.Entry(
+                "test2", 10101, SET_DEFAULT, TAG_NONE, METERED_NO, ROAMING_NO,
+                DEFAULT_NETWORK_NO, 50000L, 25L, 100000L, 50L, 0L);
+
+        NetworkStats.Entry entry4 = new NetworkStats.Entry(
+                "test2", 10101, SET_DBG_VPN_OUT, TAG_NONE, METERED_NO, ROAMING_NO,
+                DEFAULT_NETWORK_NO, 50000L, 25L, 100000L, 50L, 0L);
+
+        NetworkStats stats = new NetworkStats(TEST_START, 4)
+                .addValues(entry1)
+                .addValues(entry2)
+                .addValues(entry3)
+                .addValues(entry4);
+
+        stats.filterDebugEntries();
+
+        assertEquals(2, stats.size());
+        assertEquals(entry1, stats.getValues(0, null));
+        assertEquals(entry3, stats.getValues(1, null));
+    }
+
+    @Test
     public void testApply464xlatAdjustments() {
         final String v4Iface = "v4-wlan0";
         final String baseIface = "wlan0";
@@ -796,25 +863,23 @@ public class NetworkStatsTest {
                 0 /* operations */);
 
         // Traffic measured for the root uid on the base interface if eBPF is in use.
-        // Incorrectly includes appEntry's bytes and packets, plus IPv4-IPv6 translation
-        // overhead (20 bytes per packet), only for TX traffic.
         final NetworkStats.Entry ebpfRootUidEntry = new NetworkStats.Entry(
                 baseIface, rootUid, SET_DEFAULT, TAG_NONE,
                 163577 /* rxBytes */,
                 187 /* rxPackets */,
-                1169942 /* txBytes */,
-                13902 /* txPackets */,
+                17607 /* txBytes */,
+                97 /* txPackets */,
                 0 /* operations */);
 
         // Traffic measured for the root uid on the base interface if xt_qtaguid is in use.
         // Incorrectly includes appEntry's bytes and packets, plus IPv4-IPv6 translation
-        // overhead (20 bytes per packet), in both directions.
+        // overhead (20 bytes per packet), in rx direction.
         final NetworkStats.Entry xtRootUidEntry = new NetworkStats.Entry(
                 baseIface, rootUid, SET_DEFAULT, TAG_NONE,
                 31113087 /* rxBytes */,
                 22588 /* rxPackets */,
-                1169942 /* txBytes */,
-                13902 /* txPackets */,
+                17607 /* txBytes */,
+                97 /* txPackets */,
                 0 /* operations */);
 
         final NetworkStats.Entry otherEntry = new NetworkStats.Entry(

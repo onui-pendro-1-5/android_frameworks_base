@@ -19,6 +19,7 @@ package android.app;
 import android.annotation.IntDef;
 import android.annotation.SystemService;
 import android.annotation.TestApi;
+import android.annotation.UnsupportedAppUsage;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.os.RemoteException;
@@ -125,6 +126,7 @@ public class UiModeManager {
 
     private IUiModeManager mService;
 
+    @UnsupportedAppUsage
     /*package*/ UiModeManager() throws ServiceNotFoundException {
         mService = IUiModeManager.Stub.asInterface(
                 ServiceManager.getServiceOrThrow(Context.UI_MODE_SERVICE));
@@ -227,7 +229,11 @@ public class UiModeManager {
      * <strong>Note:</strong> On API 22 and below, changes to the night mode
      * are only effective when the {@link Configuration#UI_MODE_TYPE_CAR car}
      * or {@link Configuration#UI_MODE_TYPE_DESK desk} mode is enabled on a
-     * device. Starting in API 23, changes to night mode are always effective.
+     * device. On API 23 through API 28, changes to night mode are always effective.
+     * <p>
+     * Starting in API 29, when the device is in car mode and this method is called, night mode
+     * will change, but the new setting is not persisted and the previously persisted setting
+     * will be restored when the device exits car mode.
      * <p>
      * Changes to night mode take effect globally and will result in a configuration change
      * (and potentially an Activity lifecycle event) being applied to all running apps.

@@ -28,8 +28,8 @@ import static com.android.systemui.doze.DozeMachine.State.UNINITIALIZED;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -38,19 +38,22 @@ import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import android.support.test.filters.SmallTest;
+import android.hardware.display.AmbientDisplayConfiguration;
 import android.testing.AndroidTestingRunner;
-import android.view.Display;
-
-import com.android.internal.hardware.AmbientDisplayConfiguration;
-import com.android.systemui.SysuiTestCase;
-import com.android.systemui.util.wakelock.WakeLockFake;
-
 import android.testing.UiThreadTest;
+
+import androidx.test.filters.SmallTest;
+
+import com.android.systemui.SysuiTestCase;
+import com.android.systemui.keyguard.WakefulnessLifecycle;
+import com.android.systemui.statusbar.policy.BatteryController;
+import com.android.systemui.util.wakelock.WakeLockFake;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 
 @SmallTest
 @RunWith(AndroidTestingRunner.class)
@@ -59,6 +62,8 @@ public class DozeMachineTest extends SysuiTestCase {
 
     DozeMachine mMachine;
 
+    @Mock
+    private WakefulnessLifecycle mWakefulnessLifecycle;
     private DozeServiceFake mServiceFake;
     private WakeLockFake mWakeLockFake;
     private AmbientDisplayConfiguration mConfigMock;
@@ -66,13 +71,14 @@ public class DozeMachineTest extends SysuiTestCase {
 
     @Before
     public void setUp() {
+        MockitoAnnotations.initMocks(this);
         mServiceFake = new DozeServiceFake();
         mWakeLockFake = new WakeLockFake();
         mConfigMock = mock(AmbientDisplayConfiguration.class);
         mPartMock = mock(DozeMachine.Part.class);
 
-        mMachine = new DozeMachine(mServiceFake, mConfigMock, mWakeLockFake);
-
+        mMachine = new DozeMachine(mServiceFake, mConfigMock, mWakeLockFake,
+                mWakefulnessLifecycle, mock(BatteryController.class));
         mMachine.setParts(new DozeMachine.Part[]{mPartMock});
     }
 
@@ -232,9 +238,9 @@ public class DozeMachineTest extends SysuiTestCase {
     public void testPulseReason_getMatchesRequest() {
         mMachine.requestState(INITIALIZED);
         mMachine.requestState(DOZE);
-        mMachine.requestPulse(DozeLog.PULSE_REASON_SENSOR_DOUBLE_TAP);
+        mMachine.requestPulse(DozeLog.REASON_SENSOR_DOUBLE_TAP);
 
-        assertEquals(DozeLog.PULSE_REASON_SENSOR_DOUBLE_TAP, mMachine.getPulseReason());
+        assertEquals(DozeLog.REASON_SENSOR_DOUBLE_TAP, mMachine.getPulseReason());
     }
 
     @Test

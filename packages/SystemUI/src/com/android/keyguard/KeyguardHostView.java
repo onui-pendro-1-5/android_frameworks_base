@@ -20,6 +20,7 @@ import android.app.Activity;
 import android.app.ActivityManager;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.graphics.Canvas;
 import android.media.AudioManager;
@@ -31,13 +32,14 @@ import android.telephony.TelephonyManager;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.KeyEvent;
-import android.view.accessibility.AccessibilityEvent;
 import android.widget.FrameLayout;
 
 import com.android.internal.widget.LockPatternUtils;
 import com.android.keyguard.KeyguardSecurityContainer.SecurityCallback;
 import com.android.keyguard.KeyguardSecurityModel.SecurityMode;
 import com.android.settingslib.Utils;
+import com.android.systemui.R;
+import com.android.systemui.plugins.ActivityStarter.OnDismissAction;
 
 import java.io.File;
 
@@ -51,13 +53,6 @@ import java.io.File;
  * showing.
  */
 public class KeyguardHostView extends FrameLayout implements SecurityCallback {
-
-    public interface OnDismissAction {
-        /**
-         * @return true if the dismiss should be deferred
-         */
-        boolean onDismiss();
-    }
 
     private AudioManager mAudioManager;
     private TelephonyManager mTelephonyManager = null;
@@ -184,6 +179,10 @@ public class KeyguardHostView extends FrameLayout implements SecurityCallback {
         mSecurityContainer.showPrimarySecurityScreen(false);
     }
 
+    public KeyguardSecurityView getCurrentSecurityView() {
+        return mSecurityContainer != null ? mSecurityContainer.getCurrentSecurityView() : null;
+    }
+
     /**
      * Show a string explaining why the security view needs to be solved.
      *
@@ -196,8 +195,8 @@ public class KeyguardHostView extends FrameLayout implements SecurityCallback {
         mSecurityContainer.showPromptReason(reason);
     }
 
-    public void showMessage(CharSequence message, int color) {
-        mSecurityContainer.showMessage(message, color);
+    public void showMessage(CharSequence message, ColorStateList colorState) {
+        mSecurityContainer.showMessage(message, colorState);
     }
 
     public void showErrorMessage(CharSequence message) {
@@ -260,6 +259,11 @@ public class KeyguardHostView extends FrameLayout implements SecurityCallback {
     @Override
     public void reset() {
         mViewMediatorCallback.resetKeyguard();
+    }
+
+    @Override
+    public void onCancelClicked() {
+        mViewMediatorCallback.onCancelClicked();
     }
 
     public void resetSecurityContainer() {

@@ -16,7 +16,9 @@
 
 package com.android.systemui.statusbar;
 
+import static com.android.systemui.Interpolators.FAST_OUT_SLOW_IN_REVERSE;
 import static com.android.systemui.statusbar.phone.NotificationIconContainer.IconState.NO_VALUE;
+import static com.android.systemui.util.InjectionInflationController.VIEW_CONTEXT;
 
 import android.content.Context;
 import android.content.res.Configuration;
@@ -25,46 +27,54 @@ import android.graphics.Rect;
 import android.os.SystemProperties;
 import android.util.AttributeSet;
 import android.util.Log;
-import android.util.MathUtils;
+import android.view.DisplayCutout;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
+import android.view.WindowInsets;
 import android.view.accessibility.AccessibilityNodeInfo;
 
+import com.android.internal.annotations.VisibleForTesting;
+import com.android.systemui.Dependency;
 import com.android.systemui.Interpolators;
 import com.android.systemui.R;
+import com.android.systemui.plugins.statusbar.StatusBarStateController;
+import com.android.systemui.plugins.statusbar.StatusBarStateController.StateListener;
 import com.android.systemui.statusbar.notification.NotificationUtils;
+import com.android.systemui.statusbar.notification.row.ActivatableNotificationView;
+import com.android.systemui.statusbar.notification.row.ExpandableNotificationRow;
+import com.android.systemui.statusbar.notification.row.ExpandableView;
+import com.android.systemui.statusbar.notification.stack.AmbientState;
+import com.android.systemui.statusbar.notification.stack.AnimationProperties;
+import com.android.systemui.statusbar.notification.stack.ExpandableViewState;
+import com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout;
+import com.android.systemui.statusbar.notification.stack.ViewState;
+import com.android.systemui.statusbar.phone.KeyguardBypassController;
 import com.android.systemui.statusbar.phone.NotificationIconContainer;
-import com.android.systemui.statusbar.stack.AmbientState;
-import com.android.systemui.statusbar.stack.AnimationProperties;
-import com.android.systemui.statusbar.stack.ExpandableViewState;
-import com.android.systemui.statusbar.stack.NotificationStackScrollLayout;
-import com.android.systemui.statusbar.stack.StackScrollState;
-import com.android.systemui.statusbar.stack.ViewState;
+
+import javax.inject.Inject;
+import javax.inject.Named;
 
 /**
  * A notification shelf view that is placed inside the notification scroller. It manages the
  * overflow icons that don't fit into the regular list anymore.
  */
 public class NotificationShelf extends ActivatableNotificationView implements
-        View.OnLayoutChangeListener {
+        View.OnLayoutChangeListener, StateListener {
 
-    public static final boolean SHOW_AMBIENT_ICONS = true;
     private static final boolean USE_ANIMATIONS_WHEN_OPENING =
             SystemProperties.getBoolean("debug.icon_opening_animations", true);
     private static final boolean ICON_ANMATIONS_WHILE_SCROLLING
             = SystemProperties.getBoolean("debug.icon_scroll_animations", true);
     private static final int TAG_CONTINUOUS_CLIPPING = R.id.continuous_clipping_tag;
     private static final String TAG = "NotificationShelf";
-    private static final long SHELF_IN_TRANSLATION_DURATION = 200;
+    private final KeyguardBypassController mBypassController;
 
-    private boolean mDark;
     private NotificationIconContainer mShelfIcons;
-    private ShelfState mShelfState;
     private int[] mTmp = new int[2];
     private boolean mHideBackground;
     private int mIconAppearTopPadding;
-    private int mShelfAppearTranslation;
+    private float mHiddenShelfIconSize;
     private int mStatusBarHeight;
     private int mStatusBarPaddingStart;
     private AmbientState mAmbientState;
@@ -86,13 +96,20 @@ public class NotificationShelf extends ActivatableNotificationView implements
     private boolean mShowNotificationShelf;
     private float mFirstElementRoundness;
     private Rect mClipRect = new Rect();
+    private int mCutoutHeight;
+    private int mGapHeight;
 
-    public NotificationShelf(Context context, AttributeSet attrs) {
+    @Inject
+    public NotificationShelf(@Named(VIEW_CONTEXT) Context context,
+            AttributeSet attrs,
+            KeyguardBypassController keyguardBypassController) {
         super(context, attrs);
+        mBypassController = keyguardBypassController;
     }
 
     @Override
-    protected void onFinishInflate() {
+    @VisibleForTesting
+    public void onFinishInflate() {
         super.onFinishInflate();
         mShelfIcons = findViewById(R.id.content);
         mShelfIcons.setClipChildren(false);
@@ -102,9 +119,21 @@ public class NotificationShelf extends ActivatableNotificationView implements
         setClipChildren(false);
         setClipToPadding(false);
         mShelfIcons.setIsStaticLayout(false);
-        mShelfState = new ShelfState();
         setBottomRoundness(1.0f, false /* animate */);
         initDimens();
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        ((SysuiStatusBarStateController) Dependency.get(StatusBarStateController.class))
+                .addCallback(this, SysuiStatusBarStateController.RANK_SHELF);
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        Dependency.get(StatusBarStateController.class).removeCallback(this);
     }
 
     public void bind(AmbientState ambientState, NotificationStackScrollLayout hostLayout) {
@@ -118,7 +147,6 @@ public class NotificationShelf extends ActivatableNotificationView implements
         mStatusBarHeight = res.getDimensionPixelOffset(R.dimen.status_bar_height);
         mStatusBarPaddingStart = res.getDimensionPixelOffset(R.dimen.status_bar_padding_start);
         mPaddingBetweenElements = res.getDimensionPixelSize(R.dimen.notification_divider_height);
-        mShelfAppearTranslation = res.getDimensionPixelSize(R.dimen.shelf_appear_translation);
 
         ViewGroup.LayoutParams layoutParams = getLayoutParams();
         layoutParams.height = res.getDimensionPixelOffset(R.dimen.notification_shelf_height);
@@ -129,6 +157,8 @@ public class NotificationShelf extends ActivatableNotificationView implements
         mScrollFastThreshold = res.getDimensionPixelOffset(R.dimen.scroll_fast_threshold);
         mShowNotificationShelf = res.getBoolean(R.bool.config_showNotificationShelf);
         mIconSize = res.getDimensionPixelSize(com.android.internal.R.dimen.status_bar_icon_size);
+        mHiddenShelfIconSize = res.getDimensionPixelOffset(R.dimen.hidden_shelf_icon_size);
+        mGapHeight = res.getDimensionPixelSize(R.dimen.qs_notification_padding);
 
         if (!mShowNotificationShelf) {
             setVisibility(GONE);
@@ -147,30 +177,6 @@ public class NotificationShelf extends ActivatableNotificationView implements
     }
 
     @Override
-    public void setDark(boolean dark, boolean fade, long delay) {
-        super.setDark(dark, fade, delay);
-        if (mDark == dark) return;
-        mDark = dark;
-        mShelfIcons.setDark(dark, fade, delay);
-        updateInteractiveness();
-    }
-
-    public void fadeInTranslating() {
-        mShelfIcons.setTranslationY(-mShelfAppearTranslation);
-        mShelfIcons.setAlpha(0);
-        mShelfIcons.animate()
-                .setInterpolator(Interpolators.DECELERATE_QUINT)
-                .translationY(0)
-                .setDuration(SHELF_IN_TRANSLATION_DURATION)
-                .start();
-        mShelfIcons.animate()
-                .alpha(1)
-                .setInterpolator(Interpolators.LINEAR)
-                .setDuration(SHELF_IN_TRANSLATION_DURATION)
-                .start();
-    }
-
-    @Override
     protected View getContentView() {
         return mShelfIcons;
     }
@@ -180,49 +186,49 @@ public class NotificationShelf extends ActivatableNotificationView implements
     }
 
     @Override
-    public ExpandableViewState createNewViewState(StackScrollState stackScrollState) {
-        return mShelfState;
+    public ExpandableViewState createExpandableViewState() {
+        return new ShelfState();
     }
 
-    public void updateState(StackScrollState resultState,
-            AmbientState ambientState) {
-        View lastView = ambientState.getLastVisibleBackgroundChild();
+    /** Update the state of the shelf. */
+    public void updateState(AmbientState ambientState) {
+        ExpandableView lastView = ambientState.getLastVisibleBackgroundChild();
+        ShelfState viewState = (ShelfState) getViewState();
         if (mShowNotificationShelf && lastView != null) {
             float maxShelfEnd = ambientState.getInnerHeight() + ambientState.getTopPadding()
                     + ambientState.getStackTranslation();
-            ExpandableViewState lastViewState = resultState.getViewStateForView(lastView);
+            ExpandableViewState lastViewState = lastView.getViewState();
             float viewEnd = lastViewState.yTranslation + lastViewState.height;
-            mShelfState.copyFrom(lastViewState);
-            mShelfState.height = getIntrinsicHeight();
+            viewState.copyFrom(lastViewState);
+            viewState.height = getIntrinsicHeight();
 
-            float awakenTranslation = Math.max(Math.min(viewEnd, maxShelfEnd) - mShelfState.height,
+            viewState.yTranslation = Math.max(Math.min(viewEnd, maxShelfEnd) - viewState.height,
                     getFullyClosedTranslation());
-            float darkTranslation = mAmbientState.getDarkTopPadding();
-            float yRatio = mAmbientState.hasPulsingNotifications() ?
-                    0 : mAmbientState.getDarkAmount();
-            mShelfState.yTranslation = MathUtils.lerp(awakenTranslation, darkTranslation, yRatio);
-            mShelfState.zTranslation = ambientState.getBaseZHeight();
-            float openedAmount = (mShelfState.yTranslation - getFullyClosedTranslation())
-                    / (getIntrinsicHeight() * 2);
+            viewState.zTranslation = ambientState.getBaseZHeight();
+            // For the small display size, it's not enough to make the icon not covered by
+            // the top cutout so the denominator add the height of cutout.
+            // Totally, (getIntrinsicHeight() * 2 + mCutoutHeight) should be smaller then
+            // mAmbientState.getTopPadding().
+            float openedAmount = (viewState.yTranslation - getFullyClosedTranslation())
+                    / (getIntrinsicHeight() * 2 + mCutoutHeight);
             openedAmount = Math.min(1.0f, openedAmount);
-            mShelfState.openedAmount = openedAmount;
-            mShelfState.clipTopAmount = 0;
-            mShelfState.alpha = mAmbientState.hasPulsingNotifications() ? 0 : 1;
-            mShelfState.belowSpeedBump = mAmbientState.getSpeedBumpIndex() == 0;
-            mShelfState.shadowAlpha = 1.0f;
-            mShelfState.hideSensitive = false;
-            mShelfState.xTranslation = getTranslationX();
+            viewState.openedAmount = openedAmount;
+            viewState.clipTopAmount = 0;
+            viewState.alpha = 1;
+            viewState.belowSpeedBump = mAmbientState.getSpeedBumpIndex() == 0;
+            viewState.hideSensitive = false;
+            viewState.xTranslation = getTranslationX();
             if (mNotGoneIndex != -1) {
-                mShelfState.notGoneIndex = Math.min(mShelfState.notGoneIndex, mNotGoneIndex);
+                viewState.notGoneIndex = Math.min(viewState.notGoneIndex, mNotGoneIndex);
             }
-            mShelfState.hasItemsInStableShelf = lastViewState.inShelf;
-            mShelfState.hidden = !mAmbientState.isShadeExpanded()
+            viewState.hasItemsInStableShelf = lastViewState.inShelf;
+            viewState.hidden = !mAmbientState.isShadeExpanded()
                     || mAmbientState.isQsCustomizerShowing();
-            mShelfState.maxShelfEnd = maxShelfEnd;
+            viewState.maxShelfEnd = maxShelfEnd;
         } else {
-            mShelfState.hidden = true;
-            mShelfState.location = ExpandableViewState.LOCATION_GONE;
-            mShelfState.hasItemsInStableShelf = false;
+            viewState.hidden = true;
+            viewState.location = ExpandableViewState.LOCATION_GONE;
+            viewState.hasItemsInStableShelf = false;
         }
     }
 
@@ -251,7 +257,7 @@ public class NotificationShelf extends ActivatableNotificationView implements
         int notGoneIndex = 0;
         int colorOfViewBeforeLast = NO_COLOR;
         boolean backgroundForceHidden = false;
-        if (mHideBackground && !mShelfState.hasItemsInStableShelf) {
+        if (mHideBackground && !((ShelfState) getViewState()).hasItemsInStableShelf) {
             backgroundForceHidden = true;
         }
         int colorTwoBefore = NO_COLOR;
@@ -266,17 +272,19 @@ public class NotificationShelf extends ActivatableNotificationView implements
                 && !mAmbientState.isPanelTracking();
         int baseZHeight = mAmbientState.getBaseZHeight();
         int backgroundTop = 0;
+        int clipTopAmount = 0;
         float firstElementRoundness = 0.0f;
+        ActivatableNotificationView previousRow = null;
 
         for (int i = 0; i < mHostLayout.getChildCount(); i++) {
             ExpandableView child = (ExpandableView) mHostLayout.getChildAt(i);
 
-            if (!(child instanceof ExpandableNotificationRow)
-                    || child.getVisibility() == GONE) {
+            if (!(child instanceof ActivatableNotificationView)
+                    || child.getVisibility() == GONE || child == this) {
                 continue;
             }
 
-            ExpandableNotificationRow row = (ExpandableNotificationRow) child;
+            ActivatableNotificationView row = (ActivatableNotificationView) child;
             float notificationClipEnd;
             boolean aboveShelf = ViewState.getFinalTranslationZ(row) > baseZHeight
                     || row.isPinned();
@@ -294,52 +302,87 @@ public class NotificationShelf extends ActivatableNotificationView implements
                             rowTranslationY + getNotificationMergeSize());
                 }
             }
-            updateNotificationClipHeight(row, notificationClipEnd);
-            float inShelfAmount = updateIconAppearance(row, expandAmount, scrolling, scrollingFast,
-                    expandingAnimated, isLastChild);
-            numViewsInShelf += inShelfAmount;
-            int ownColorUntinted = row.getBackgroundColorWithoutTint();
-            if (rowTranslationY >= shelfStart && mNotGoneIndex == -1) {
-                mNotGoneIndex = notGoneIndex;
-                setTintColor(previousColor);
-                setOverrideTintColor(colorTwoBefore, transitionAmount);
+            int clipTop = updateNotificationClipHeight(row, notificationClipEnd, notGoneIndex);
+            clipTopAmount = Math.max(clipTop, clipTopAmount);
 
-            } else if (mNotGoneIndex == -1) {
-                colorTwoBefore = previousColor;
-                transitionAmount = inShelfAmount;
-            }
-            if (isLastChild) {
-                if (colorOfViewBeforeLast == NO_COLOR) {
+            // If the current row is an ExpandableNotificationRow, update its color, roundedness,
+            // and icon state.
+            if (row instanceof ExpandableNotificationRow) {
+                ExpandableNotificationRow expandableRow = (ExpandableNotificationRow) row;
+
+                float inShelfAmount = updateIconAppearance(expandableRow, expandAmount, scrolling,
+                        scrollingFast,
+                        expandingAnimated, isLastChild);
+                numViewsInShelf += inShelfAmount;
+                int ownColorUntinted = row.getBackgroundColorWithoutTint();
+                if (rowTranslationY >= shelfStart && mNotGoneIndex == -1) {
+                    mNotGoneIndex = notGoneIndex;
+                    setTintColor(previousColor);
+                    setOverrideTintColor(colorTwoBefore, transitionAmount);
+
+                } else if (mNotGoneIndex == -1) {
+                    colorTwoBefore = previousColor;
+                    transitionAmount = inShelfAmount;
+                }
+                // We don't want to modify the color if the notification is hun'd
+                boolean canModifyColor = mAmbientState.isShadeExpanded()
+                        && !(mAmbientState.isOnKeyguard() && mBypassController.getBypassEnabled());
+                if (isLastChild && canModifyColor) {
+                    if (colorOfViewBeforeLast == NO_COLOR) {
+                        colorOfViewBeforeLast = ownColorUntinted;
+                    }
+                    row.setOverrideTintColor(colorOfViewBeforeLast, inShelfAmount);
+                } else {
                     colorOfViewBeforeLast = ownColorUntinted;
+                    row.setOverrideTintColor(NO_COLOR, 0 /* overrideAmount */);
                 }
-                row.setOverrideTintColor(colorOfViewBeforeLast, inShelfAmount);
-            } else {
-                colorOfViewBeforeLast = ownColorUntinted;
-                row.setOverrideTintColor(NO_COLOR, 0 /* overrideAmount */);
-            }
-            if (notGoneIndex != 0 || !aboveShelf) {
-                row.setAboveShelf(false);
-            }
-            if (notGoneIndex == 0) {
-                StatusBarIconView icon = row.getEntry().expandedIcon;
-                NotificationIconContainer.IconState iconState = getIconState(icon);
-                if (iconState != null && iconState.clampedAppearAmount == 1.0f) {
-                    // only if the first icon is fully in the shelf we want to clip to it!
-                    backgroundTop = (int) (row.getTranslationY() - getTranslationY());
-                    firstElementRoundness = row.getCurrentTopRoundness();
-                } else if (iconState == null) {
-                    Log.wtf(TAG, "iconState is null. ExpandedIcon: " + row.getEntry().expandedIcon
-                            + (row.getEntry().expandedIcon != null
-                            ? "\n icon parent: " + row.getEntry().expandedIcon.getParent() : "")
-                            + " \n number of notifications: " + mHostLayout.getChildCount() );
+                if (notGoneIndex != 0 || !aboveShelf) {
+                    expandableRow.setAboveShelf(false);
                 }
-            }
-            notGoneIndex++;
-            previousColor = ownColorUntinted;
-        }
+                if (notGoneIndex == 0) {
+                    StatusBarIconView icon = expandableRow.getEntry().expandedIcon;
+                    NotificationIconContainer.IconState iconState = getIconState(icon);
+                    // The icon state might be null in rare cases where the notification is actually
+                    // added to the layout, but not to the shelf. An example are replied messages,
+                    // since they don't show up on AOD
+                    if (iconState != null && iconState.clampedAppearAmount == 1.0f) {
+                        // only if the first icon is fully in the shelf we want to clip to it!
+                        backgroundTop = (int) (row.getTranslationY() - getTranslationY());
+                        firstElementRoundness = row.getCurrentTopRoundness();
+                    }
+                }
 
+                previousColor = ownColorUntinted;
+                notGoneIndex++;
+            }
+
+            if (row.isFirstInSection() && previousRow != null && previousRow.isLastInSection()) {
+                // If the top of the shelf is between the view before a gap and the view after a gap
+                // then we need to adjust the shelf's top roundness.
+                float distanceToGapBottom = row.getTranslationY() - getTranslationY();
+                float distanceToGapTop = getTranslationY()
+                        - (previousRow.getTranslationY() + previousRow.getActualHeight());
+                if (distanceToGapTop > 0) {
+                    // We interpolate our top roundness so that it's fully rounded if we're at the
+                    // bottom of the gap, and not rounded at all if we're at the top of the gap
+                    // (directly up against the bottom of previousRow)
+                    // Then we apply the same roundness to the bottom of previousRow so that the
+                    // corners join together as the shelf approaches previousRow.
+                    firstElementRoundness = (float) Math.min(1.0, distanceToGapTop / mGapHeight);
+                    previousRow.setBottomRoundness(firstElementRoundness,
+                            false /* don't animate */);
+                    backgroundTop = (int) distanceToGapBottom;
+                }
+            }
+            previousRow = row;
+        }
         clipTransientViews();
 
+        setClipTopAmount(clipTopAmount);
+        boolean isHidden = getViewState().hidden || clipTopAmount >= getIntrinsicHeight();
+        if (mShowNotificationShelf) {
+            setVisibility(isHidden ? View.INVISIBLE : View.VISIBLE);
+        }
         setBackgroundTop(backgroundTop);
         setFirstElementRoundness(firstElementRoundness);
         mShelfIcons.setSpeedBumpIndex(mAmbientState.getSpeedBumpIndex());
@@ -373,7 +416,7 @@ public class NotificationShelf extends ActivatableNotificationView implements
             View transientView = mHostLayout.getTransientView(i);
             if (transientView instanceof ExpandableNotificationRow) {
                 ExpandableNotificationRow transientRow = (ExpandableNotificationRow) transientView;
-                updateNotificationClipHeight(transientRow, getTranslationY());
+                updateNotificationClipHeight(transientRow, getTranslationY(), -1);
             } else {
                 Log.e(TAG, "NotificationShelf.clipTransientViews(): "
                         + "Trying to clip non-row transient view");
@@ -390,9 +433,13 @@ public class NotificationShelf extends ActivatableNotificationView implements
 
     private void updateIconClipAmount(ExpandableNotificationRow row) {
         float maxTop = row.getTranslationY();
+        if (getClipTopAmount() != 0) {
+            // if the shelf is clipped, lets make sure we also clip the icon
+            maxTop = Math.max(maxTop, getTranslationY() + getClipTopAmount());
+        }
         StatusBarIconView icon = row.getEntry().expandedIcon;
         float shelfIconPosition = getTranslationY() + icon.getTop() + icon.getTranslationY();
-        if (shelfIconPosition < maxTop && !mAmbientState.isDark()) {
+        if (shelfIconPosition < maxTop && !mAmbientState.isFullyHidden()) {
             int top = (int) (maxTop - shelfIconPosition);
             Rect clipRect = new Rect(0, top, icon.getWidth(), Math.max(top, icon.getHeight()));
             icon.setClipBounds(clipRect);
@@ -403,7 +450,7 @@ public class NotificationShelf extends ActivatableNotificationView implements
 
     private void updateContinuousClipping(final ExpandableNotificationRow row) {
         StatusBarIconView icon = row.getEntry().expandedIcon;
-        boolean needsContinuousClipping = ViewState.isAnimatingY(icon) && !mAmbientState.isDark();
+        boolean needsContinuousClipping = ViewState.isAnimatingY(icon) && !mAmbientState.isDozing();
         boolean isContinuousClipping = icon.getTag(TAG_CONTINUOUS_CLIPPING) != null;
         if (needsContinuousClipping && !isContinuousClipping) {
             final ViewTreeObserver observer = icon.getViewTreeObserver();
@@ -413,7 +460,9 @@ public class NotificationShelf extends ActivatableNotificationView implements
                         public boolean onPreDraw() {
                             boolean animatingY = ViewState.isAnimatingY(icon);
                             if (!animatingY) {
-                                observer.removeOnPreDrawListener(this);
+                                if (observer.isAlive()) {
+                                    observer.removeOnPreDrawListener(this);
+                                }
                                 icon.setTag(TAG_CONTINUOUS_CLIPPING, null);
                                 return true;
                             }
@@ -430,7 +479,9 @@ public class NotificationShelf extends ActivatableNotificationView implements
                 @Override
                 public void onViewDetachedFromWindow(View v) {
                     if (v == icon) {
-                        observer.removeOnPreDrawListener(predrawListener);
+                        if (observer.isAlive()) {
+                            observer.removeOnPreDrawListener(predrawListener);
+                        }
                         icon.setTag(TAG_CONTINUOUS_CLIPPING, null);
                     }
                 }
@@ -439,12 +490,22 @@ public class NotificationShelf extends ActivatableNotificationView implements
         }
     }
 
-    private void updateNotificationClipHeight(ExpandableNotificationRow row,
-            float notificationClipEnd) {
+    /**
+     * Update the clipping of this view.
+     * @return the amount that our own top should be clipped
+     */
+    private int updateNotificationClipHeight(ActivatableNotificationView row,
+            float notificationClipEnd, int childIndex) {
         float viewEnd = row.getTranslationY() + row.getActualHeight();
         boolean isPinned = (row.isPinned() || row.isHeadsUpAnimatingAway())
                 && !mAmbientState.isDozingAndNotPulsing(row);
-        if (viewEnd > notificationClipEnd
+        boolean shouldClipOwnTop;
+        if (mAmbientState.isPulseExpanding()) {
+            shouldClipOwnTop = childIndex == 0;
+        } else {
+            shouldClipOwnTop = row.showingPulsing();
+        }
+        if (viewEnd > notificationClipEnd && !shouldClipOwnTop
                 && (mAmbientState.isShadeExpanded() || !isPinned)) {
             int clipBottomAmount = (int) (viewEnd - notificationClipEnd);
             if (isPinned) {
@@ -454,6 +515,11 @@ public class NotificationShelf extends ActivatableNotificationView implements
             row.setClipBottomAmount(clipBottomAmount);
         } else {
             row.setClipBottomAmount(0);
+        }
+        if (shouldClipOwnTop) {
+            return (int) (viewEnd - getTranslationY());
+        } else {
+            return 0;
         }
     }
 
@@ -490,6 +556,7 @@ public class NotificationShelf extends ActivatableNotificationView implements
                     - getIntrinsicHeight());
         }
         float viewEnd = viewStart + fullHeight;
+        // TODO: fix this check for anchor scrolling.
         if (expandingAnimated && mAmbientState.getScrollY() == 0
                 && !mAmbientState.isOnKeyguard() && !iconState.isLastExpandIcon) {
             // We are expanding animated. Because we switch to a linear interpolation in this case,
@@ -590,8 +657,8 @@ public class NotificationShelf extends ActivatableNotificationView implements
             iconState.translateContent = false;
         }
         float transitionAmount;
-        if (mAmbientState.getDarkAmount() > 0 && !row.isInShelf()) {
-            transitionAmount = mAmbientState.isFullyDark() ? 1 : 0;
+        if (mAmbientState.isHiddenAtAll() && !row.isInShelf()) {
+            transitionAmount = mAmbientState.isFullyHidden() ? 1 : 0;
         } else if (isLastChild || !USE_ANIMATIONS_WHEN_OPENING || iconState.useFullTransitionAmount
                 || iconState.useLinearTransitionAmount) {
             transitionAmount = iconTransitionAmount;
@@ -606,7 +673,7 @@ public class NotificationShelf extends ActivatableNotificationView implements
                 ? fullTransitionAmount
                 : transitionAmount;
         iconState.clampedAppearAmount = clampedAmount;
-        float contentTransformationAmount = !mAmbientState.isAboveShelf(row)
+        float contentTransformationAmount = !row.isAboveShelf() && !row.showingPulsing()
                     && (isLastChild || iconState.translateContent)
                 ? iconTransitionAmount
                 : 0.0f;
@@ -641,12 +708,13 @@ public class NotificationShelf extends ActivatableNotificationView implements
         }
         notificationIconPosition += iconTopPadding;
         float shelfIconPosition = getTranslationY() + icon.getTop();
-        shelfIconPosition += (icon.getHeight() - icon.getIconScale() * mIconSize) / 2.0f;
+        float iconSize = mAmbientState.isFullyHidden() ? mHiddenShelfIconSize : mIconSize;
+        shelfIconPosition += (icon.getHeight() - icon.getIconScale() * iconSize) / 2.0f;
         float iconYTranslation = NotificationUtils.interpolate(
                 notificationIconPosition - shelfIconPosition,
                 0,
                 transitionAmount);
-        float shelfIconSize = mIconSize * icon.getIconScale();
+        float shelfIconSize = iconSize * icon.getIconScale();
         float alpha = 1.0f;
         boolean noIcon = !row.isShowingIcon();
         if (noIcon) {
@@ -675,7 +743,9 @@ public class NotificationShelf extends ActivatableNotificationView implements
                 iconState.scaleY = 1.0f;
                 iconState.hidden = false;
             }
-            if (mAmbientState.isAboveShelf(row) || (!row.isInShelf() && (isLastChild && row.areGutsExposed()
+            if (row.isAboveShelf()
+                    || row.showingPulsing()
+                    || (!row.isInShelf() && (isLastChild && row.areGutsExposed()
                     || row.getTranslationZ() > mAmbientState.getBaseZHeight()))) {
                 iconState.hidden = true;
             }
@@ -715,10 +785,6 @@ public class NotificationShelf extends ActivatableNotificationView implements
         }
     }
 
-    public boolean hidesBackground() {
-        return mHideBackground;
-    }
-
     @Override
     protected boolean needsOutline() {
         return !mHideBackground && super.needsOutline();
@@ -747,10 +813,26 @@ public class NotificationShelf extends ActivatableNotificationView implements
         mRelativeOffset -= mTmp[0];
     }
 
+    @Override
+    public WindowInsets onApplyWindowInsets(WindowInsets insets) {
+        WindowInsets ret = super.onApplyWindowInsets(insets);
+
+        // NotificationShelf drag from the status bar and the status bar dock on the top
+        // of the display for current design so just focus on the top of ScreenDecorations.
+        // In landscape or multiple window split mode, the NotificationShelf still drag from
+        // the top and the physical notch/cutout goes to the right, left, or both side of the
+        // display so it doesn't matter for the NotificationSelf in landscape.
+        DisplayCutout displayCutout = insets.getDisplayCutout();
+        mCutoutHeight = displayCutout == null || displayCutout.getSafeInsetTop() < 0
+                ? 0 : displayCutout.getSafeInsetTop();
+
+        return ret;
+    }
+
     private void setOpenedAmount(float openedAmount) {
         mNoAnimationsInThisFrame = openedAmount == 1.0f && mOpenedAmount == 0.0f;
         mOpenedAmount = openedAmount;
-        if (!mAmbientState.isPanelFullWidth()) {
+        if (!mAmbientState.isPanelFullWidth() || mAmbientState.isDozing()) {
             // We don't do a transformation at all, lets just assume we are fully opened
             openedAmount = 1.0f;
         }
@@ -761,7 +843,7 @@ public class NotificationShelf extends ActivatableNotificationView implements
         int width = (int) NotificationUtils.interpolate(
                 start + mCollapsedIcons.getFinalTranslationX(),
                 mShelfIcons.getWidth(),
-                openedAmount);
+                FAST_OUT_SLOW_IN_REVERSE.getInterpolation(openedAmount));
         mShelfIcons.setActualLayoutWidth(width);
         boolean hasOverflow = mCollapsedIcons.hasOverflow();
         int collapsedPadding = mCollapsedIcons.getPaddingEnd();
@@ -814,16 +896,14 @@ public class NotificationShelf extends ActivatableNotificationView implements
         mCollapsedIcons.addOnLayoutChangeListener(this);
     }
 
-    public void setStatusBarState(int statusBarState) {
-        if (mStatusBarState != statusBarState) {
-            mStatusBarState = statusBarState;
-            updateInteractiveness();
-        }
+    @Override
+    public void onStateChanged(int newState) {
+        mStatusBarState = newState;
+        updateInteractiveness();
     }
 
     private void updateInteractiveness() {
-        mInteractive = mStatusBarState == StatusBarState.KEYGUARD && mHasItemsInStableShelf
-                && !mDark;
+        mInteractive = mStatusBarState == StatusBarState.KEYGUARD && mHasItemsInStableShelf;
         setClickable(mInteractive);
         setFocusable(mInteractive);
         setImportantForAccessibility(mInteractive ? View.IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -841,7 +921,6 @@ public class NotificationShelf extends ActivatableNotificationView implements
 
     public void setAnimationsEnabled(boolean enabled) {
         mAnimationsEnabled = enabled;
-        mCollapsedIcons.setAnimationsEnabled(enabled);
         if (!enabled) {
             // we need to wait with enabling the animations until the first frame has passed
             mShelfIcons.setAnimationsEnabled(false);
@@ -870,6 +949,10 @@ public class NotificationShelf extends ActivatableNotificationView implements
     public void onLayoutChange(View v, int left, int top, int right, int bottom, int oldLeft,
             int oldTop, int oldRight, int oldBottom) {
         updateRelativeOffset();
+    }
+
+    public void onUiModeChanged() {
+        updateBackgroundColors();
     }
 
     private class ShelfState extends ExpandableViewState {

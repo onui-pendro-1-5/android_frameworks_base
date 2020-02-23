@@ -17,6 +17,9 @@
 package android.telephony.data;
 
 import android.annotation.IntDef;
+import android.annotation.NonNull;
+import android.annotation.Nullable;
+import android.annotation.SystemApi;
 import android.net.LinkProperties;
 import android.os.RemoteException;
 import android.telephony.Rlog;
@@ -24,7 +27,6 @@ import android.telephony.data.DataService.DataServiceProvider;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
-import java.lang.ref.WeakReference;
 import java.util.List;
 
 /**
@@ -34,9 +36,12 @@ import java.util.List;
  *
  * @hide
  */
+@SystemApi
 public class DataServiceCallback {
 
     private static final String TAG = DataServiceCallback.class.getSimpleName();
+
+    private static final boolean DBG = true;
 
     /**
      * Result of data requests
@@ -58,11 +63,11 @@ public class DataServiceCallback {
     /** Request sent in illegal state */
     public static final int RESULT_ERROR_ILLEGAL_STATE  = 4;
 
-    private final WeakReference<IDataServiceCallback> mCallback;
+    private final IDataServiceCallback mCallback;
 
     /** @hide */
     public DataServiceCallback(IDataServiceCallback callback) {
-        mCallback = new WeakReference<>(callback);
+        mCallback = callback;
     }
 
     /**
@@ -72,14 +77,17 @@ public class DataServiceCallback {
      * @param result The result code. Must be one of the {@link ResultCode}.
      * @param response Setup data call response.
      */
-    public void onSetupDataCallComplete(@ResultCode int result, DataCallResponse response) {
-        IDataServiceCallback callback = mCallback.get();
-        if (callback != null) {
+    public void onSetupDataCallComplete(@ResultCode int result,
+                                        @Nullable DataCallResponse response) {
+        if (mCallback != null) {
             try {
-                callback.onSetupDataCallComplete(result, response);
+                if (DBG) Rlog.d(TAG, "onSetupDataCallComplete");
+                mCallback.onSetupDataCallComplete(result, response);
             } catch (RemoteException e) {
                 Rlog.e(TAG, "Failed to onSetupDataCallComplete on the remote");
             }
+        } else {
+            Rlog.e(TAG, "onSetupDataCallComplete: callback is null!");
         }
     }
 
@@ -90,13 +98,15 @@ public class DataServiceCallback {
      * @param result The result code. Must be one of the {@link ResultCode}.
      */
     public void onDeactivateDataCallComplete(@ResultCode int result) {
-        IDataServiceCallback callback = mCallback.get();
-        if (callback != null) {
+        if (mCallback != null) {
             try {
-                callback.onDeactivateDataCallComplete(result);
+                if (DBG) Rlog.d(TAG, "onDeactivateDataCallComplete");
+                mCallback.onDeactivateDataCallComplete(result);
             } catch (RemoteException e) {
                 Rlog.e(TAG, "Failed to onDeactivateDataCallComplete on the remote");
             }
+        } else {
+            Rlog.e(TAG, "onDeactivateDataCallComplete: callback is null!");
         }
     }
 
@@ -107,13 +117,14 @@ public class DataServiceCallback {
      * @param result The result code. Must be one of the {@link ResultCode}.
      */
     public void onSetInitialAttachApnComplete(@ResultCode int result) {
-        IDataServiceCallback callback = mCallback.get();
-        if (callback != null) {
+        if (mCallback != null) {
             try {
-                callback.onSetInitialAttachApnComplete(result);
+                mCallback.onSetInitialAttachApnComplete(result);
             } catch (RemoteException e) {
                 Rlog.e(TAG, "Failed to onSetInitialAttachApnComplete on the remote");
             }
+        } else {
+            Rlog.e(TAG, "onSetInitialAttachApnComplete: callback is null!");
         }
     }
 
@@ -124,48 +135,54 @@ public class DataServiceCallback {
      * @param result The result code. Must be one of the {@link ResultCode}.
      */
     public void onSetDataProfileComplete(@ResultCode int result) {
-        IDataServiceCallback callback = mCallback.get();
-        if (callback != null) {
+        if (mCallback != null) {
             try {
-                callback.onSetDataProfileComplete(result);
+                mCallback.onSetDataProfileComplete(result);
             } catch (RemoteException e) {
                 Rlog.e(TAG, "Failed to onSetDataProfileComplete on the remote");
             }
+        } else {
+            Rlog.e(TAG, "onSetDataProfileComplete: callback is null!");
         }
     }
 
     /**
-     * Called to indicate result for the request {@link DataServiceProvider#getDataCallList(
+     * Called to indicate result for the request {@link DataServiceProvider#requestDataCallList(
      * DataServiceCallback)}.
      *
      * @param result The result code. Must be one of the {@link ResultCode}.
-     * @param dataCallList List of the current active data connection.
+     * @param dataCallList List of the current active data connection. If no data call is presented,
+     * set it to an empty list.
      */
-    public void onGetDataCallListComplete(@ResultCode int result,
-                                          List<DataCallResponse> dataCallList) {
-        IDataServiceCallback callback = mCallback.get();
-        if (callback != null) {
+    public void onRequestDataCallListComplete(@ResultCode int result,
+                                              @NonNull List<DataCallResponse> dataCallList) {
+        if (mCallback != null) {
             try {
-                callback.onGetDataCallListComplete(result, dataCallList);
+                mCallback.onRequestDataCallListComplete(result, dataCallList);
             } catch (RemoteException e) {
-                Rlog.e(TAG, "Failed to onGetDataCallListComplete on the remote");
+                Rlog.e(TAG, "Failed to onRequestDataCallListComplete on the remote");
             }
+        } else {
+            Rlog.e(TAG, "onRequestDataCallListComplete: callback is null!");
         }
     }
 
     /**
-     * Called to indicate that data connection list changed.
+     * Called to indicate that data connection list changed. If no data call is presented, set it to
+     * an empty list.
      *
      * @param dataCallList List of the current active data connection.
      */
-    public void onDataCallListChanged(List<DataCallResponse> dataCallList) {
-        IDataServiceCallback callback = mCallback.get();
-        if (callback != null) {
+    public void onDataCallListChanged(@NonNull List<DataCallResponse> dataCallList) {
+        if (mCallback != null) {
             try {
-                callback.onDataCallListChanged(dataCallList);
+                if (DBG) Rlog.d(TAG, "onDataCallListChanged");
+                mCallback.onDataCallListChanged(dataCallList);
             } catch (RemoteException e) {
                 Rlog.e(TAG, "Failed to onDataCallListChanged on the remote");
             }
+        } else {
+            Rlog.e(TAG, "onDataCallListChanged: callback is null!");
         }
     }
 }

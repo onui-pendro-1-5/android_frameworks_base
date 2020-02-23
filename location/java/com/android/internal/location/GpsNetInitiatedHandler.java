@@ -16,9 +16,6 @@
 
 package com.android.internal.location;
 
-import java.io.UnsupportedEncodingException;
-import java.util.concurrent.TimeUnit;
-
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -26,19 +23,22 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.location.LocationManager;
 import android.location.INetInitiatedListener;
+import android.location.LocationManager;
+import android.os.RemoteException;
 import android.os.SystemClock;
-import android.telephony.TelephonyManager;
+import android.os.UserHandle;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.PhoneStateListener;
-import android.os.RemoteException;
-import android.os.UserHandle;
+import android.telephony.TelephonyManager;
 import android.util.Log;
 
-import com.android.internal.notification.SystemNotificationChannels;
 import com.android.internal.R;
+import com.android.internal.notification.SystemNotificationChannels;
 import com.android.internal.telephony.GsmAlphabet;
+
+import java.io.UnsupportedEncodingException;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A GPS Network-initiated Handler class used by LocationManager.
@@ -91,9 +91,6 @@ public class GpsNetInitiatedHandler {
     public static final int GPS_ENC_SUPL_UTF8 = 2;
     public static final int GPS_ENC_SUPL_UCS2 = 3;
     public static final int GPS_ENC_UNKNOWN = -1;
-
-    // Limit on SUPL NI emergency mode time extension after emergency sessions ends
-    private static final int MAX_EMERGENCY_MODE_EXTENSION_SECONDS = 300;  // 5 minute maximum
 
     private final Context mContext;
     private final TelephonyManager mTelephonyManager;
@@ -241,6 +238,8 @@ public class GpsNetInitiatedHandler {
      *    window after the end of that call.
      * 3. If the device is in a emergency callback state, this is provided by querying
      *    TelephonyManager.
+     * 4. If the user has recently sent an Emergency SMS and telephony reports that it is in
+     *    emergency SMS mode, this is provided by querying TelephonyManager.
      * @return true if is considered in user initiated emergency mode for NI purposes
      */
     public boolean getInEmergency() {
@@ -249,22 +248,14 @@ public class GpsNetInitiatedHandler {
                 && ((SystemClock.elapsedRealtime() - mCallEndElapsedRealtimeMillis)
                         < mEmergencyExtensionMillis);
         boolean isInEmergencyCallback = mTelephonyManager.getEmergencyCallbackMode();
-        return mIsInEmergencyCall || isInEmergencyCallback || isInEmergencyExtension;
+        boolean isInEmergencySmsMode = mTelephonyManager.isInEmergencySmsMode();
+        return mIsInEmergencyCall || isInEmergencyCallback || isInEmergencyExtension
+                || isInEmergencySmsMode;
     }
 
     public void setEmergencyExtensionSeconds(int emergencyExtensionSeconds) {
-        if (emergencyExtensionSeconds > MAX_EMERGENCY_MODE_EXTENSION_SECONDS) {
-            Log.w(TAG, "emergencyExtensionSeconds " + emergencyExtensionSeconds
-                    + " too high, reset to " + MAX_EMERGENCY_MODE_EXTENSION_SECONDS);
-            emergencyExtensionSeconds = MAX_EMERGENCY_MODE_EXTENSION_SECONDS;
-        } else if (emergencyExtensionSeconds < 0) {
-            Log.w(TAG, "emergencyExtensionSeconds " + emergencyExtensionSeconds
-                    + " is negative, reset to zero.");
-            emergencyExtensionSeconds = 0;
-        }
         mEmergencyExtensionMillis = TimeUnit.SECONDS.toMillis(emergencyExtensionSeconds);
     }
-
 
     // Handles NI events from HAL
     public void handleNiNotification(GpsNiNotification notif) {
@@ -366,7 +357,9 @@ public class GpsNetInitiatedHandler {
         }
     }
 
-    // Sets the NI notification.
+    /**
+     * Posts a notification in the status bar using the contents in {@code notif} object.
+     */
     private synchronized void setNiNotification(GpsNiNotification notif) {
         NotificationManager notificationManager = (NotificationManager) mContext
                 .getSystemService(Context.NOTIFICATION_SERVICE);
@@ -548,35 +541,26 @@ public class GpsNetInitiatedHandler {
      */
     static private String decodeString(String original, boolean isHex, int coding)
     {
-        String decoded = original;
+        if (coding == GPS_ENC_NONE || coding == GPS_ENC_UNKNOWN) {
+            return original;
+        }
+
         byte[] input = stringToByteArray(original, isHex);
 
         switch (coding) {
-        case GPS_ENC_NONE:
-            decoded = original;
-            break;
+            case GPS_ENC_SUPL_GSM_DEFAULT:
+                return decodeGSMPackedString(input);
 
-        case GPS_ENC_SUPL_GSM_DEFAULT:
-            decoded = decodeGSMPackedString(input);
-            break;
+            case GPS_ENC_SUPL_UTF8:
+                return decodeUTF8String(input);
 
-        case GPS_ENC_SUPL_UTF8:
-            decoded = decodeUTF8String(input);
-            break;
+            case GPS_ENC_SUPL_UCS2:
+                return decodeUCS2String(input);
 
-        case GPS_ENC_SUPL_UCS2:
-            decoded = decodeUCS2String(input);
-            break;
-
-        case GPS_ENC_UNKNOWN:
-            decoded = original;
-            break;
-
-        default:
-            Log.e(TAG, "Unknown encoding " + coding + " for NI text " + original);
-            break;
+            default:
+                Log.e(TAG, "Unknown encoding " + coding + " for NI text " + original);
+                return original;
         }
-        return decoded;
     }
 
     // change this to configure notification display

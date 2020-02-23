@@ -24,12 +24,12 @@ import android.os.Process;
 import android.os.SystemProperties;
 import android.util.Slog;
 
+import com.android.internal.os.BinderInternal;
+import com.android.systemui.shared.plugins.PluginManager;
+import com.android.systemui.shared.plugins.PluginManagerImpl;
+
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
-
-import com.android.internal.os.BinderInternal;
-import com.android.systemui.plugins.PluginManager;
-import com.android.systemui.plugins.PluginManagerImpl;
 
 public class SystemUIService extends Service {
 
@@ -66,8 +66,14 @@ public class SystemUIService extends Service {
 
     @Override
     protected void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
-        SystemUI[] services = ((SystemUIApplication) getApplication()).getServices();
+        dumpServices(((SystemUIApplication) getApplication()).getServices(), fd, pw, args);
+    }
+
+    static void dumpServices(
+            SystemUI[] services, FileDescriptor fd, PrintWriter pw, String[] args) {
         if (args == null || args.length == 0) {
+            pw.println("dumping service: " + Dependency.class.getName());
+            Dependency.staticDump(fd, pw, args);
             for (SystemUI ui: services) {
                 pw.println("dumping service: " + ui.getClass().getName());
                 ui.dump(fd, pw, args);
@@ -77,9 +83,12 @@ public class SystemUIService extends Service {
                 ((PluginManagerImpl) Dependency.get(PluginManager.class)).dump(fd, pw, args);
             }
         } else {
-            String svc = args[0];
+            String svc = args[0].toLowerCase();
+            if (Dependency.class.getName().endsWith(svc)) {
+                Dependency.staticDump(fd, pw, args);
+            }
             for (SystemUI ui: services) {
-                String name = ui.getClass().getName();
+                String name = ui.getClass().getName().toLowerCase();
                 if (name.endsWith(svc)) {
                     ui.dump(fd, pw, args);
                 }

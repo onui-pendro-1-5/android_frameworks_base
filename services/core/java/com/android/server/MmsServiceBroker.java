@@ -17,7 +17,6 @@
 package com.android.server;
 
 import android.Manifest;
-import android.app.ActivityManagerInternal;
 import android.app.AppOpsManager;
 import android.app.PendingIntent;
 import android.content.ComponentName;
@@ -38,10 +37,12 @@ import android.os.SystemClock;
 import android.os.UserHandle;
 import android.service.carrier.CarrierMessagingService;
 import android.telephony.SmsManager;
+import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.util.Slog;
 
 import com.android.internal.telephony.IMms;
+import com.android.server.uri.UriGrantsManagerInternal;
 
 import java.util.List;
 
@@ -331,16 +332,18 @@ public class MmsServiceBroker extends SystemService {
         @Override
         public void sendMessage(int subId, String callingPkg, Uri contentUri,
                 String locationUrl, Bundle configOverrides, PendingIntent sentIntent)
-                        throws RemoteException {
+                throws RemoteException {
             Slog.d(TAG, "sendMessage() by " + callingPkg);
             mContext.enforceCallingPermission(Manifest.permission.SEND_SMS, "Send MMS message");
             if (getAppOpsManager().noteOp(AppOpsManager.OP_SEND_SMS, Binder.getCallingUid(),
                     callingPkg) != AppOpsManager.MODE_ALLOWED) {
+                Slog.e(TAG, callingPkg + " is not allowed to call sendMessage()");
                 return;
             }
             contentUri = adjustUriForUserAndGrantPermission(contentUri,
                     CarrierMessagingService.SERVICE_INTERFACE,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    subId);
             getServiceGuarded().sendMessage(subId, callingPkg, contentUri, locationUrl,
                     configOverrides, sentIntent);
         }
@@ -354,11 +357,13 @@ public class MmsServiceBroker extends SystemService {
                     "Download MMS message");
             if (getAppOpsManager().noteOp(AppOpsManager.OP_RECEIVE_MMS, Binder.getCallingUid(),
                     callingPkg) != AppOpsManager.MODE_ALLOWED) {
+                Slog.e(TAG, callingPkg + " is not allowed to call downloadMessage()");
                 return;
             }
             contentUri = adjustUriForUserAndGrantPermission(contentUri,
                     CarrierMessagingService.SERVICE_INTERFACE,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                    subId);
 
             getServiceGuarded().downloadMessage(subId, callingPkg, locationUrl, contentUri,
                     configOverrides, downloadedIntent);
@@ -386,7 +391,7 @@ public class MmsServiceBroker extends SystemService {
         @Override
         public Uri importMultimediaMessage(String callingPkg, Uri contentUri,
                 String messageId, long timestampSecs, boolean seen, boolean read)
-                        throws RemoteException {
+                throws RemoteException {
             if (getAppOpsManager().noteOp(AppOpsManager.OP_WRITE_SMS, Binder.getCallingUid(),
                     callingPkg) != AppOpsManager.MODE_ALLOWED) {
                 // Silently fail AppOps failure due to not being the default SMS app
@@ -494,12 +499,12 @@ public class MmsServiceBroker extends SystemService {
          * even if the caller is not in the primary user.
          *
          * @param contentUri The Uri to adjust
-         * @param action The intent action used to find the associated carrier app
+         * @param action     The intent action used to find the associated carrier app
          * @param permission The permission to add
          * @return The adjusted Uri containing the calling userId.
          */
         private Uri adjustUriForUserAndGrantPermission(Uri contentUri, String action,
-                int permission) {
+                int permission, int subId) {
             final Intent grantIntent = new Intent();
             grantIntent.setData(contentUri);
             grantIntent.setFlags(permission);
@@ -512,18 +517,19 @@ public class MmsServiceBroker extends SystemService {
 
             long token = Binder.clearCallingIdentity();
             try {
-                LocalServices.getService(ActivityManagerInternal.class)
+                LocalServices.getService(UriGrantsManagerInternal.class)
                         .grantUriPermissionFromIntent(callingUid, PHONE_PACKAGE_NAME,
                                 grantIntent, UserHandle.USER_SYSTEM);
 
                 // Grant permission for the carrier app.
                 Intent intent = new Intent(action);
                 TelephonyManager telephonyManager =
-                    (TelephonyManager) mContext.getSystemService(Context.TELEPHONY_SERVICE);
-                List<String> carrierPackages = telephonyManager.getCarrierPackageNamesForIntent(
-                        intent);
+                        (TelephonyManager) mContext.getSystemService(Context.TELEPHONY_SERVICE);
+                List<String> carrierPackages =
+                        telephonyManager.getCarrierPackageNamesForIntentAndPhone(
+                                intent, SubscriptionManager.getPhoneId(subId));
                 if (carrierPackages != null && carrierPackages.size() == 1) {
-                    LocalServices.getService(ActivityManagerInternal.class)
+                    LocalServices.getService(UriGrantsManagerInternal.class)
                             .grantUriPermissionFromIntent(callingUid, carrierPackages.get(0),
                                     grantIntent, UserHandle.USER_SYSTEM);
                 }

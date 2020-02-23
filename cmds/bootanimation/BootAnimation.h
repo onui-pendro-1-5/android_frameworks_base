@@ -22,6 +22,7 @@
 
 #include <androidfw/AssetManager.h>
 #include <utils/Thread.h>
+#include <binder/IBinder.h>
 
 #include <EGL/egl.h>
 #include <GLES/gl.h>
@@ -113,7 +114,8 @@ public:
         virtual void shutdown() {}
     };
 
-    BootAnimation(sp<Callbacks> callbacks);
+    explicit BootAnimation(sp<Callbacks> callbacks);
+    virtual ~BootAnimation();
 
     sp<SurfaceComposerClient> session() const;
 
@@ -127,7 +129,7 @@ private:
 
     class TimeCheckThread : public Thread {
     public:
-        TimeCheckThread(BootAnimation* bootAnimation);
+        explicit TimeCheckThread(BootAnimation* bootAnimation);
         virtual ~TimeCheckThread();
     private:
         virtual status_t    readyToRun();
@@ -154,6 +156,8 @@ private:
     void releaseAnimation(Animation*) const;
     bool parseAnimationDesc(Animation&);
     bool preloadZip(Animation &animation);
+    void findBootAnimationFile();
+    bool preloadAnimation();
 
     void checkExit();
 
@@ -170,6 +174,7 @@ private:
     EGLDisplay  mDisplay;
     EGLDisplay  mContext;
     EGLDisplay  mSurface;
+    sp<IBinder> mDisplayToken;
     sp<SurfaceControl> mFlingerSurfaceControl;
     sp<Surface> mFlingerSurface;
     bool        mClockEnabled;
@@ -180,6 +185,7 @@ private:
     SortedVector<String8> mLoadedFiles;
     sp<TimeCheckThread> mTimeCheckThread = nullptr;
     sp<Callbacks> mCallbacks;
+    Animation* mAnimation = nullptr;
 };
 
 // ---------------------------------------------------------------------------

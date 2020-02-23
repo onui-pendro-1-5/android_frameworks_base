@@ -42,7 +42,6 @@ import android.os.DropBoxManager;
 import android.os.FileUtils;
 import android.os.Handler;
 import android.os.HandlerThread;
-import android.os.IBatteryPropertiesListener;
 import android.os.IBatteryPropertiesRegistrar;
 import android.os.IBinder;
 import android.os.OsProtoEnums;
@@ -132,6 +131,7 @@ public final class BatteryService extends SystemService {
     // discharge stats before the device dies.
     private int mCriticalBatteryLevel;
 
+    // TODO: Current args don't work since "--unplugged" flag was purposefully removed.
     private static final String[] DUMPSYS_ARGS = new String[] { "--checkin", "--unplugged" };
 
     private static final String DUMPSYS_DATA_PATH = "/data/system/";
@@ -198,7 +198,6 @@ public final class BatteryService extends SystemService {
 
     // Battery light customization
     private boolean mBatteryLightEnabled;
-    private boolean mLowBatteryBlinking;
 
     private boolean mSentLowBatteryBroadcast = false;
 
@@ -255,6 +254,8 @@ public final class BatteryService extends SystemService {
             invalidChargerObserver.startObserving(
                     "DEVPATH=/devices/virtual/switch/invalid_charger");
         }
+        mBatteryLightEnabled = mContext.getResources().getBoolean(
+                com.android.internal.R.bool.config_intrusiveBatteryLed);
     }
 
     @Override
@@ -423,10 +424,27 @@ public final class BatteryService extends SystemService {
                 && (oldPlugged || mLastBatteryLevel > mLowBatteryWarningLevel);
     }
 
+    private boolean shouldShutdownLocked() {
+        if (mHealthInfo.batteryLevel > 0) {
+            return false;
+        }
+
+        // Battery-less devices should not shutdown.
+        if (!mHealthInfo.batteryPresent) {
+            return false;
+        }
+
+        // If battery state is not CHARGING, shutdown.
+        // - If battery present and state == unknown, this is an unexpected error state.
+        // - If level <= 0 and state == full, this is also an unexpected state
+        // - All other states (NOT_CHARGING, DISCHARGING) means it is not charging.
+        return mHealthInfo.batteryStatus != BatteryManager.BATTERY_STATUS_CHARGING;
+    }
+
     private void shutdownIfNoPowerLocked() {
         // shut down gracefully if our battery is critically low and we are not powered.
         // wait until the system has booted before attempting to display the shutdown dialog.
-        if (mHealthInfo.batteryLevel == 0 && !isPoweredLocked(BatteryManager.BATTERY_PLUGGED_ANY)) {
+        if (shouldShutdownLocked()) {
             mHandler.post(new Runnable() {
                 @Override
                 public void run() {
@@ -466,6 +484,12 @@ public final class BatteryService extends SystemService {
 
     private void update(android.hardware.health.V2_0.HealthInfo info) {
         traceBegin("HealthInfoUpdate");
+
+        Trace.traceCounter(Trace.TRACE_TAG_POWER, "BatteryChargeCounter",
+                info.legacy.batteryChargeCounter);
+        Trace.traceCounter(Trace.TRACE_TAG_POWER, "BatteryCurrent",
+                info.legacy.batteryCurrent);
+
         synchronized (mLock) {
             if (!mUpdatesStopped) {
                 mHealthInfo = info.legacy;
@@ -808,48 +832,7 @@ public final class BatteryService extends SystemService {
         mLastBatteryLevelChangedSentMs = SystemClock.elapsedRealtime();
     }
 
-    private boolean isDashCharger() {
-        try {
-            FileReader file = new FileReader("/sys/class/power_supply/battery/fastchg_status");
-            BufferedReader br = new BufferedReader(file);
-            String state = br.readLine();
-            br.close();
-            file.close();
-            return "1".equals(state);
-        } catch (FileNotFoundException e) {
-        } catch (IOException e) {
-        }
-        return false;
-    }
-
-    private boolean isTurboPower() {
-        try {
-            FileReader file = new FileReader("/sys/class/power_supply/battery/charge_rate");
-            BufferedReader br = new BufferedReader(file);
-            String state = br.readLine();
-            br.close();
-            file.close();
-            return "Turbo".equals(state);
-        } catch (FileNotFoundException e) {
-        } catch (IOException e) {
-        }
-        return false;
-    }
-
-    private boolean isSuperCharger() {
-        try {
-            FileReader file = new FileReader("/sys/class/power_supply/Battery/scp_status");
-            BufferedReader br = new BufferedReader(file);
-            String state = br.readLine();
-            br.close();
-            file.close();
-            return "1".equals(state);
-        } catch (FileNotFoundException e) {
-        } catch (IOException e) {
-        }
-        return false;
-    }
-
+    // TODO: Current code doesn't work since "--unplugged" flag in BSS was purposefully removed.
     private void logBatteryStatsLocked() {
         IBinder batteryInfoService = ServiceManager.getService(BatteryStats.SERVICE_NAME);
         if (batteryInfoService == null) return;
@@ -1285,12 +1268,7 @@ public final class BatteryService extends SystemService {
     // Reduced IBatteryPropertiesRegistrar that only implements getProperty for usage
     // in BatteryManager.
     private final class BatteryPropertiesRegistrar extends IBatteryPropertiesRegistrar.Stub {
-        public void registerListener(IBatteryPropertiesListener listener) {
-            Slog.e(TAG, "health: must not call registerListener on battery properties");
-        }
-        public void unregisterListener(IBatteryPropertiesListener listener) {
-            Slog.e(TAG, "health: must not call unregisterListener on battery properties");
-        }
+        @Override
         public int getProperty(int id, final BatteryProperty prop) throws RemoteException {
             traceBegin("HealthGetProperty");
             try {
@@ -1340,6 +1318,7 @@ public final class BatteryService extends SystemService {
                 traceEnd();
             }
         }
+        @Override
         public void scheduleUpdate() throws RemoteException {
             traceBegin("HealthScheduleUpdate");
             try {

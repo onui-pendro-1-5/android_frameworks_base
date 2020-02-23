@@ -17,11 +17,16 @@
 package android.view;
 
 import android.annotation.IntDef;
+import android.annotation.NonNull;
+import android.annotation.UnsupportedAppUsage;
 import android.content.res.CompatibilityInfo.Translator;
 import android.graphics.Canvas;
+import android.graphics.ColorSpace;
 import android.graphics.GraphicBuffer;
 import android.graphics.Matrix;
+import android.graphics.RecordingCanvas;
 import android.graphics.Rect;
+import android.graphics.RenderNode;
 import android.graphics.SurfaceTexture;
 import android.os.Parcel;
 import android.os.Parcelable;
@@ -54,12 +59,14 @@ public class Surface implements Parcelable {
             throws OutOfResourcesException;
 
     private static native long nativeCreateFromSurfaceControl(long surfaceControlNativeObject);
-    private static native long nativeGetFromSurfaceControl(long surfaceControlNativeObject);
+    private static native long nativeGetFromSurfaceControl(long surfaceObject,
+            long surfaceControlNativeObject);
 
     private static native long nativeLockCanvas(long nativeObject, Canvas canvas, Rect dirty)
             throws OutOfResourcesException;
     private static native void nativeUnlockCanvasAndPost(long nativeObject, Canvas canvas);
 
+    @UnsupportedAppUsage
     private static native void nativeRelease(long nativeObject);
     private static native boolean nativeIsValid(long nativeObject);
     private static native boolean nativeIsConsumerRunningBehind(long nativeObject);
@@ -74,12 +81,13 @@ public class Surface implements Parcelable {
     private static native long nativeGetNextFrameNumber(long nativeObject);
     private static native int nativeSetScalingMode(long nativeObject, int scalingMode);
     private static native int nativeForceScopedDisconnect(long nativeObject);
-    private static native int nativeAttachAndQueueBuffer(long nativeObject, GraphicBuffer buffer);
+    private static native int nativeAttachAndQueueBufferWithColorSpace(long nativeObject,
+            GraphicBuffer buffer, int colorSpaceId);
 
     private static native int nativeSetSharedBufferModeEnabled(long nativeObject, boolean enabled);
     private static native int nativeSetAutoRefreshEnabled(long nativeObject, boolean enabled);
 
-    public static final Parcelable.Creator<Surface> CREATOR =
+    public static final @android.annotation.NonNull Parcelable.Creator<Surface> CREATOR =
             new Parcelable.Creator<Surface>() {
         @Override
         public Surface createFromParcel(Parcel source) {
@@ -102,9 +110,13 @@ public class Surface implements Parcelable {
     private final CloseGuard mCloseGuard = CloseGuard.get();
 
     // Guarded state.
+    @UnsupportedAppUsage
     final Object mLock = new Object(); // protects the native state
+    @UnsupportedAppUsage
     private String mName;
+    @UnsupportedAppUsage
     long mNativeObject; // package scope only for SurfaceControl access
+    @UnsupportedAppUsage
     private long mLockedObject;
     private int mGenerationId; // incremented each time mNativeObject changes
     private final Canvas mCanvas = new CompatibleCanvas();
@@ -172,7 +184,20 @@ public class Surface implements Parcelable {
      * Create an empty surface, which will later be filled in by readFromParcel().
      * @hide
      */
+    @UnsupportedAppUsage
     public Surface() {
+    }
+
+    /**
+     * Create a Surface assosciated with a given {@link SurfaceControl}. Buffers submitted to this
+     * surface will be displayed by the system compositor according to the parameters
+     * specified by the control. Multiple surfaces may be constructed from one SurfaceControl,
+     * but only one can be connected (e.g. have an active EGL context) at a time.
+     *
+     * @param from The SurfaceControl to assosciate this Surface with
+     */
+    public Surface(@NonNull SurfaceControl from) {
+        copyFrom(from);
     }
 
     /**
@@ -203,6 +228,7 @@ public class Surface implements Parcelable {
     }
 
     /* called from android_view_Surface_createFromIGraphicBufferProducer() */
+    @UnsupportedAppUsage
     private Surface(long nativeObject) {
         synchronized (mLock) {
             setNativeObjectLocked(nativeObject);
@@ -245,6 +271,7 @@ public class Surface implements Parcelable {
      * called from the process that created the service.
      * @hide
      */
+    @UnsupportedAppUsage
     public void destroy() {
         release();
     }
@@ -293,6 +320,7 @@ public class Surface implements Parcelable {
      *
      * @hide
      */
+    @UnsupportedAppUsage
     public long getNextFrameNumber() {
         synchronized (mLock) {
             checkNotReleasedLocked();
@@ -482,9 +510,9 @@ public class Surface implements Parcelable {
      * in to it.
      *
      * @param other {@link SurfaceControl} to copy from.
-     *
      * @hide
      */
+    @UnsupportedAppUsage
     public void copyFrom(SurfaceControl other) {
         if (other == null) {
             throw new IllegalArgumentException("other must not be null");
@@ -495,9 +523,12 @@ public class Surface implements Parcelable {
             throw new NullPointerException(
                     "null SurfaceControl native object. Are you using a released SurfaceControl?");
         }
-        long newNativeObject = nativeGetFromSurfaceControl(surfaceControlPtr);
+        long newNativeObject = nativeGetFromSurfaceControl(mNativeObject, surfaceControlPtr);
 
         synchronized (mLock) {
+            if (newNativeObject == mNativeObject) {
+                return;
+            }
             if (mNativeObject != 0) {
                 nativeRelease(mNativeObject);
             }
@@ -544,6 +575,7 @@ public class Surface implements Parcelable {
      * @deprecated
      */
     @Deprecated
+    @UnsupportedAppUsage
     public void transferFrom(Surface other) {
         if (other == null) {
             throw new IllegalArgumentException("other must not be null");
@@ -669,18 +701,35 @@ public class Surface implements Parcelable {
     }
 
     /**
+     * Transfer ownership of buffer with a color space and present it on the Surface.
+     * The supported color spaces are SRGB and Display P3, other color spaces will be
+     * treated as SRGB.
+     * @hide
+     */
+    public void attachAndQueueBufferWithColorSpace(GraphicBuffer buffer, ColorSpace colorSpace) {
+        synchronized (mLock) {
+            checkNotReleasedLocked();
+            if (colorSpace == null) {
+                colorSpace = ColorSpace.get(ColorSpace.Named.SRGB);
+            }
+            int err = nativeAttachAndQueueBufferWithColorSpace(mNativeObject, buffer,
+                    colorSpace.getId());
+            if (err != 0) {
+                throw new RuntimeException(
+                        "Failed to attach and queue buffer to Surface (bad object?), "
+                        + "native error: " + err);
+            }
+        }
+    }
+
+    /**
+     * Deprecated, use attachAndQueueBufferWithColorSpace instead.
      * Transfer ownership of buffer and present it on the Surface.
+     * The color space of the buffer is treated as SRGB.
      * @hide
      */
     public void attachAndQueueBuffer(GraphicBuffer buffer) {
-        synchronized (mLock) {
-            checkNotReleasedLocked();
-            int err = nativeAttachAndQueueBuffer(mNativeObject, buffer);
-            if (err != 0) {
-                throw new RuntimeException(
-                        "Failed to attach and queue buffer to Surface (bad object?)");
-            }
-        }
+        attachAndQueueBufferWithColorSpace(buffer, ColorSpace.get(ColorSpace.Named.SRGB));
     }
 
     /**
@@ -877,12 +926,13 @@ public class Surface implements Parcelable {
     private final class HwuiContext {
         private final RenderNode mRenderNode;
         private long mHwuiRenderer;
-        private DisplayListCanvas mCanvas;
+        private RecordingCanvas mCanvas;
         private final boolean mIsWideColorGamut;
 
         HwuiContext(boolean isWideColorGamut) {
             mRenderNode = RenderNode.create("HwuiCanvas", null);
             mRenderNode.setClipToBounds(false);
+            mRenderNode.setForceDarkAllowed(false);
             mIsWideColorGamut = isWideColorGamut;
             mHwuiRenderer = nHwuiCreate(mRenderNode.mNativeRenderNode, mNativeObject,
                     isWideColorGamut);
@@ -892,7 +942,7 @@ public class Surface implements Parcelable {
             if (mCanvas != null) {
                 throw new IllegalStateException("Surface was already locked!");
             }
-            mCanvas = mRenderNode.start(width, height);
+            mCanvas = mRenderNode.beginRecording(width, height);
             return mCanvas;
         }
 
@@ -901,7 +951,7 @@ public class Surface implements Parcelable {
                 throw new IllegalArgumentException("canvas object must be the same instance that "
                         + "was previously returned by lockCanvas");
             }
-            mRenderNode.end(mCanvas);
+            mRenderNode.endRecording();
             mCanvas = null;
             nHwuiDraw(mHwuiRenderer);
         }

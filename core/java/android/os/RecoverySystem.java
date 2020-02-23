@@ -22,6 +22,7 @@ import android.annotation.RequiresPermission;
 import android.annotation.SuppressLint;
 import android.annotation.SystemApi;
 import android.annotation.SystemService;
+import android.annotation.UnsupportedAppUsage;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
@@ -30,22 +31,21 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.provider.Settings;
+import android.telephony.SubscriptionInfo;
+import android.telephony.SubscriptionManager;
 import android.telephony.euicc.EuiccManager;
 import android.text.TextUtils;
+import android.text.format.DateFormat;
 import android.util.Log;
 import android.view.Display;
 import android.view.WindowManager;
 
-import com.android.internal.logging.MetricsLogger;
-
 import libcore.io.Streams;
 
-import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
@@ -58,10 +58,12 @@ import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
@@ -89,21 +91,29 @@ public class RecoverySystem {
     private static final long PUBLISH_PROGRESS_INTERVAL_MS = 500;
 
     private static final long DEFAULT_EUICC_FACTORY_RESET_TIMEOUT_MILLIS = 30000L; // 30 s
-
     private static final long MIN_EUICC_FACTORY_RESET_TIMEOUT_MILLIS = 5000L; // 5 s
-
     private static final long MAX_EUICC_FACTORY_RESET_TIMEOUT_MILLIS = 60000L; // 60 s
+
+    private static final long DEFAULT_EUICC_REMOVING_INVISIBLE_PROFILES_TIMEOUT_MILLIS =
+            45000L; // 45 s
+    private static final long MIN_EUICC_REMOVING_INVISIBLE_PROFILES_TIMEOUT_MILLIS = 15000L; // 15 s
+    private static final long MAX_EUICC_REMOVING_INVISIBLE_PROFILES_TIMEOUT_MILLIS = 90000L; // 90 s
 
     /** Used to communicate with recovery.  See bootable/recovery/recovery.cpp. */
     private static final File RECOVERY_DIR = new File("/cache/recovery");
     private static final File LOG_FILE = new File(RECOVERY_DIR, "log");
-    private static final File LAST_INSTALL_FILE = new File(RECOVERY_DIR, "last_install");
+    private static final String LAST_INSTALL_PATH = "last_install";
     private static final String LAST_PREFIX = "last_";
     private static final String ACTION_EUICC_FACTORY_RESET =
             "com.android.internal.action.EUICC_FACTORY_RESET";
+    private static final String ACTION_EUICC_REMOVE_INVISIBLE_SUBSCRIPTIONS =
+            "com.android.internal.action.EUICC_REMOVE_INVISIBLE_SUBSCRIPTIONS";
 
-    /** used in {@link #wipeEuiccData} as package name of callback intent */
-    private static final String PACKAGE_NAME_WIPING_EUICC_DATA_CALLBACK = "android";
+    /**
+     * Used in {@link #wipeEuiccData} & {@link #removeEuiccInvisibleSubs} as package name of
+     * callback intent.
+     */
+    private static final String PACKAGE_NAME_EUICC_DATA_MANAGEMENT_CALLBACK = "android";
 
     /**
      * The recovery image uses this file to identify the location (i.e. blocks)
@@ -358,6 +368,7 @@ public class RecoverySystem {
      *
      * @return the verification result.
      */
+    @UnsupportedAppUsage
     private static boolean verifyPackageCompatibility(InputStream inputStream) throws IOException {
         ArrayList<String> list = new ArrayList<>();
         ZipInputStream zis = new ZipInputStream(inputStream);
@@ -436,7 +447,7 @@ public class RecoverySystem {
                                       final Handler handler)
             throws IOException {
         String filename = packageFile.getCanonicalPath();
-        if (!filename.startsWith("/data/") || !SystemProperties.get("sys.ota.disable_uncrypt", "0").equals("0")) {
+        if (!filename.startsWith("/data/") || !SystemProperties.get("persist.sys.recovery_update", "").equals("true")) {
             return;
         }
 
@@ -551,7 +562,7 @@ public class RecoverySystem {
             // If the package is on the /data partition, the package needs to
             // be processed (i.e. uncrypt'd). The caller specifies if that has
             // been done in 'processed' parameter.
-            if (SystemProperties.get("sys.ota.disable_uncrypt", "0").equals("0") && filename.startsWith("/data/")) {
+            if (SystemProperties.get("persist.sys.recovery_update", "").equals("true") && filename.startsWith("/data/")) {
                 if (processed) {
                     if (!BLOCK_MAP_FILE.exists()) {
                         Log.e(TAG, "Package claimed to have been processed but failed to find "
@@ -634,7 +645,7 @@ public class RecoverySystem {
 
         // If the package is on the /data partition, use the block map file as
         // the package name instead.
-        if (SystemProperties.get("sys.ota.disable_uncrypt", "0").equals("0") && filename.startsWith("/data/")) {
+        if (SystemProperties.get("persist.sys.recovery_update", "").equals("true") && filename.startsWith("/data/")) {
             filename = "@/cache/recovery/block.map";
         }
 
@@ -755,8 +766,11 @@ public class RecoverySystem {
         // Block until the ordered broadcast has completed.
         condition.block();
 
+        EuiccManager euiccManager = context.getSystemService(EuiccManager.class);
         if (wipeEuicc) {
-            wipeEuiccData(context, PACKAGE_NAME_WIPING_EUICC_DATA_CALLBACK);
+            wipeEuiccData(context, PACKAGE_NAME_EUICC_DATA_MANAGEMENT_CALLBACK);
+        } else {
+            removeEuiccInvisibleSubs(context, euiccManager);
         }
 
         String shutdownArg = null;
@@ -766,7 +780,8 @@ public class RecoverySystem {
 
         String reasonArg = null;
         if (!TextUtils.isEmpty(reason)) {
-            reasonArg = "--reason=" + sanitizeArg(reason);
+            String timeStamp = DateFormat.format("yyyy-MM-ddTHH:mm:ssZ", System.currentTimeMillis()).toString();
+            reasonArg = "--reason=" + sanitizeArg(reason + "," + timeStamp);
         }
 
         final String localeArg = "--locale=" + Locale.getDefault().toLanguageTag() ;
@@ -851,9 +866,141 @@ public class RecoverySystem {
         return false;
     }
 
+    private static void removeEuiccInvisibleSubs(
+            Context context, EuiccManager euiccManager) {
+        ContentResolver cr = context.getContentResolver();
+        if (Settings.Global.getInt(cr, Settings.Global.EUICC_PROVISIONED, 0) == 0) {
+            // If the eUICC isn't provisioned, there's no need to remove euicc invisible profiles,
+            // as there's nothing to be removed.
+            Log.i(TAG, "Skip removing eUICC invisible profiles as it is not provisioned.");
+            return;
+        } else if (euiccManager == null || !euiccManager.isEnabled()) {
+            Log.i(TAG, "Skip removing eUICC invisible profiles as eUICC manager is not available.");
+            return;
+        }
+        SubscriptionManager subscriptionManager =
+                context.getSystemService(SubscriptionManager.class);
+        List<SubscriptionInfo> availableSubs =
+                subscriptionManager.getAvailableSubscriptionInfoList();
+        if (availableSubs == null || availableSubs.isEmpty()) {
+            Log.i(TAG, "Skip removing eUICC invisible profiles as no available profiles found.");
+            return;
+        }
+        List<SubscriptionInfo> invisibleSubs = new ArrayList<>();
+        for (SubscriptionInfo sub : availableSubs) {
+            if (sub.isEmbedded() && !subscriptionManager.isSubscriptionVisible(sub)) {
+                invisibleSubs.add(sub);
+            }
+        }
+        removeEuiccInvisibleSubs(context, invisibleSubs, euiccManager);
+    }
+
+    private static boolean removeEuiccInvisibleSubs(
+            Context context, List<SubscriptionInfo> subscriptionInfos, EuiccManager euiccManager) {
+        if (subscriptionInfos == null || subscriptionInfos.isEmpty()) {
+            Log.i(TAG, "There are no eUICC invisible profiles needed to be removed.");
+            return true;
+        }
+        CountDownLatch removeSubsLatch = new CountDownLatch(subscriptionInfos.size());
+        final AtomicInteger removedSubsCount = new AtomicInteger(0);
+
+        BroadcastReceiver removeEuiccSubsReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (ACTION_EUICC_REMOVE_INVISIBLE_SUBSCRIPTIONS.equals(intent.getAction())) {
+                    if (getResultCode() != EuiccManager.EMBEDDED_SUBSCRIPTION_RESULT_OK) {
+                        int detailedCode = intent.getIntExtra(
+                                EuiccManager.EXTRA_EMBEDDED_SUBSCRIPTION_DETAILED_CODE, 0);
+                        Log.e(TAG, "Error removing euicc opportunistic profile, Detailed code = "
+                                + detailedCode);
+                    } else {
+                        Log.e(TAG, "Successfully remove euicc opportunistic profile.");
+                        removedSubsCount.incrementAndGet();
+                    }
+                    removeSubsLatch.countDown();
+                }
+            }
+        };
+
+        Intent intent = new Intent(ACTION_EUICC_REMOVE_INVISIBLE_SUBSCRIPTIONS);
+        intent.setPackage(PACKAGE_NAME_EUICC_DATA_MANAGEMENT_CALLBACK);
+        PendingIntent callbackIntent = PendingIntent.getBroadcastAsUser(
+                context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT, UserHandle.SYSTEM);
+        IntentFilter intentFilter = new IntentFilter();
+        intentFilter.addAction(ACTION_EUICC_REMOVE_INVISIBLE_SUBSCRIPTIONS);
+        HandlerThread euiccHandlerThread =
+                new HandlerThread("euiccRemovingSubsReceiverThread");
+        euiccHandlerThread.start();
+        Handler euiccHandler = new Handler(euiccHandlerThread.getLooper());
+        context.getApplicationContext()
+                .registerReceiver(
+                        removeEuiccSubsReceiver, intentFilter, null, euiccHandler);
+        for (SubscriptionInfo subscriptionInfo : subscriptionInfos) {
+            Log.i(
+                    TAG,
+                    "Remove invisible subscription " + subscriptionInfo.getSubscriptionId()
+                            + " from card " + subscriptionInfo.getCardId());
+            euiccManager.createForCardId(subscriptionInfo.getCardId())
+                    .deleteSubscription(subscriptionInfo.getSubscriptionId(), callbackIntent);
+        }
+        try {
+            long waitingTimeMillis = Settings.Global.getLong(
+                    context.getContentResolver(),
+                    Settings.Global.EUICC_REMOVING_INVISIBLE_PROFILES_TIMEOUT_MILLIS,
+                    DEFAULT_EUICC_REMOVING_INVISIBLE_PROFILES_TIMEOUT_MILLIS);
+            if (waitingTimeMillis < MIN_EUICC_REMOVING_INVISIBLE_PROFILES_TIMEOUT_MILLIS) {
+                waitingTimeMillis = MIN_EUICC_REMOVING_INVISIBLE_PROFILES_TIMEOUT_MILLIS;
+            } else if (waitingTimeMillis > MAX_EUICC_REMOVING_INVISIBLE_PROFILES_TIMEOUT_MILLIS) {
+                waitingTimeMillis = MAX_EUICC_REMOVING_INVISIBLE_PROFILES_TIMEOUT_MILLIS;
+            }
+            if (!removeSubsLatch.await(waitingTimeMillis, TimeUnit.MILLISECONDS)) {
+                Log.e(TAG, "Timeout removing invisible euicc profiles.");
+                return false;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            Log.e(TAG, "Removing invisible euicc profiles interrupted", e);
+            return false;
+        } finally {
+            context.getApplicationContext().unregisterReceiver(removeEuiccSubsReceiver);
+            if (euiccHandlerThread != null) {
+                euiccHandlerThread.quit();
+            }
+        }
+        return removedSubsCount.get() == subscriptionInfos.size();
+    }
+
     /** {@hide} */
     public static void rebootPromptAndWipeUserData(Context context, String reason)
             throws IOException {
+        boolean checkpointing = false;
+        boolean needReboot = false;
+        IVold vold = null;
+        try {
+            vold = IVold.Stub.asInterface(ServiceManager.checkService("vold"));
+            if (vold != null) {
+                checkpointing = vold.needsCheckpoint();
+            } else  {
+                Log.w(TAG, "Failed to get vold");
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to check for checkpointing");
+        }
+
+        // If we are running in checkpointing mode, we should not prompt a wipe.
+        // Checkpointing may save us. If it doesn't, we will wind up here again.
+        if (checkpointing) {
+            try {
+                vold.abortChanges("rescueparty", false);
+                Log.i(TAG, "Rescue Party requested wipe. Aborting update");
+            } catch (Exception e) {
+                Log.i(TAG, "Rescue Party requested wipe. Rebooting instead.");
+                PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+                pm.reboot("rescueparty");
+            }
+            return;
+        }
+
         String reasonArg = null;
         if (!TextUtils.isEmpty(reason)) {
             reasonArg = "--reason=" + sanitizeArg(reason);
@@ -935,116 +1082,6 @@ public class RecoverySystem {
         throw new IOException("Reboot failed (no permissions?)");
     }
 
-    // Read last_install; then report time (in seconds) and I/O (in MiB) for
-    // this update to tron.
-    // Only report on the reboots immediately after an OTA update.
-    private static void parseLastInstallLog(Context context) {
-        try (BufferedReader in = new BufferedReader(new FileReader(LAST_INSTALL_FILE))) {
-            String line = null;
-            int bytesWrittenInMiB = -1, bytesStashedInMiB = -1;
-            int timeTotal = -1;
-            int uncryptTime = -1;
-            int sourceVersion = -1;
-            int temperatureStart = -1;
-            int temperatureEnd = -1;
-            int temperatureMax = -1;
-            int errorCode = -1;
-            int causeCode = -1;
-
-            while ((line = in.readLine()) != null) {
-                // Here is an example of lines in last_install:
-                // ...
-                // time_total: 101
-                // bytes_written_vendor: 51074
-                // bytes_stashed_vendor: 200
-                int numIndex = line.indexOf(':');
-                if (numIndex == -1 || numIndex + 1 >= line.length()) {
-                    continue;
-                }
-                String numString = line.substring(numIndex + 1).trim();
-                long parsedNum;
-                try {
-                    parsedNum = Long.parseLong(numString);
-                } catch (NumberFormatException ignored) {
-                    Log.e(TAG, "Failed to parse numbers in " + line);
-                    continue;
-                }
-
-                final int MiB = 1024 * 1024;
-                int scaled;
-                try {
-                    if (line.startsWith("bytes")) {
-                        scaled = Math.toIntExact(parsedNum / MiB);
-                    } else {
-                        scaled = Math.toIntExact(parsedNum);
-                    }
-                } catch (ArithmeticException ignored) {
-                    Log.e(TAG, "Number overflows in " + line);
-                    continue;
-                }
-
-                if (line.startsWith("time")) {
-                    timeTotal = scaled;
-                } else if (line.startsWith("uncrypt_time")) {
-                    uncryptTime = scaled;
-                } else if (line.startsWith("source_build")) {
-                    sourceVersion = scaled;
-                } else if (line.startsWith("bytes_written")) {
-                    bytesWrittenInMiB = (bytesWrittenInMiB == -1) ? scaled :
-                            bytesWrittenInMiB + scaled;
-                } else if (line.startsWith("bytes_stashed")) {
-                    bytesStashedInMiB = (bytesStashedInMiB == -1) ? scaled :
-                            bytesStashedInMiB + scaled;
-                } else if (line.startsWith("temperature_start")) {
-                    temperatureStart = scaled;
-                } else if (line.startsWith("temperature_end")) {
-                    temperatureEnd = scaled;
-                } else if (line.startsWith("temperature_max")) {
-                    temperatureMax = scaled;
-                } else if (line.startsWith("error")) {
-                    errorCode = scaled;
-                } else if (line.startsWith("cause")) {
-                    causeCode = scaled;
-                }
-            }
-
-            // Don't report data to tron if corresponding entry isn't found in last_install.
-            if (timeTotal != -1) {
-                MetricsLogger.histogram(context, "ota_time_total", timeTotal);
-            }
-            if (uncryptTime != -1) {
-                MetricsLogger.histogram(context, "ota_uncrypt_time", uncryptTime);
-            }
-            if (sourceVersion != -1) {
-                MetricsLogger.histogram(context, "ota_source_version", sourceVersion);
-            }
-            if (bytesWrittenInMiB != -1) {
-                MetricsLogger.histogram(context, "ota_written_in_MiBs", bytesWrittenInMiB);
-            }
-            if (bytesStashedInMiB != -1) {
-                MetricsLogger.histogram(context, "ota_stashed_in_MiBs", bytesStashedInMiB);
-            }
-            if (temperatureStart != -1) {
-                MetricsLogger.histogram(context, "ota_temperature_start", temperatureStart);
-            }
-            if (temperatureEnd != -1) {
-                MetricsLogger.histogram(context, "ota_temperature_end", temperatureEnd);
-            }
-            if (temperatureMax != -1) {
-                MetricsLogger.histogram(context, "ota_temperature_max", temperatureMax);
-            }
-            if (errorCode != -1) {
-                MetricsLogger.histogram(context, "ota_non_ab_error_code", errorCode);
-            }
-            if (causeCode != -1) {
-                MetricsLogger.histogram(context, "ota_non_ab_cause_code", causeCode);
-            }
-
-        } catch (IOException e) {
-            Log.e(TAG, "Failed to read lines in last_install", e);
-        }
-    }
-
     /**
      * Called after booting to process and remove recovery-related files.
      * @return the log file from recovery, or null if none was found.
@@ -1062,9 +1099,6 @@ public class RecoverySystem {
             Log.e(TAG, "Error reading recovery log", e);
         }
 
-        if (log != null) {
-            parseLastInstallLog(context);
-        }
 
         // Only remove the OTA package if it's partially processed (uncrypt'd).
         boolean reservePackage = BLOCK_MAP_FILE.exists();
@@ -1095,7 +1129,8 @@ public class RecoverySystem {
         // GmsCore to avoid re-downloading everything again.
         String[] names = RECOVERY_DIR.list();
         for (int i = 0; names != null && i < names.length; i++) {
-            if (names[i].startsWith(LAST_PREFIX)) continue;
+            // Do not remove the last_install file since the recovery-persist takes care of it.
+            if (names[i].startsWith(LAST_PREFIX) || names[i].equals(LAST_INSTALL_PATH)) continue;
             if (reservePackage && names[i].equals(BLOCK_MAP_FILE.getName())) continue;
             if (reservePackage && names[i].equals(UNCRYPT_PACKAGE_FILE.getName())) continue;
 

@@ -45,16 +45,23 @@ public class PackageList implements PackageListObserver, AutoCloseable {
     }
 
     @Override
-    public void onPackageAdded(String packageName) {
+    public void onPackageAdded(String packageName, int uid) {
         if (mWrappedObserver != null) {
-            mWrappedObserver.onPackageAdded(packageName);
+            mWrappedObserver.onPackageAdded(packageName, uid);
         }
     }
 
     @Override
-    public void onPackageRemoved(String packageName) {
+    public void onPackageChanged(String packageName, int uid) {
         if (mWrappedObserver != null) {
-            mWrappedObserver.onPackageRemoved(packageName);
+            mWrappedObserver.onPackageChanged(packageName, uid);
+        }
+    }
+
+    @Override
+    public void onPackageRemoved(String packageName, int uid) {
+        if (mWrappedObserver != null) {
+            mWrappedObserver.onPackageRemoved(packageName, uid);
         }
     }
 

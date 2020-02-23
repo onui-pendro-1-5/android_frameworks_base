@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 <resources>
     <!-- Buttons - Enable navbar (used by Settings and device parts app) -->
     <string name="disable_navkeys_title">Enable on-screen nav bar</string>
@@ -11,3 +12,10 @@
     <string name="pocket_lock_message_long_press">Press and hold power button to unlock</string>
 
 </resources>
+=======
+<resources>
+    <!-- Strings for Bluetooth service -->
+    <!-- toast message informing user that Bluetooth stays on after airplane mode is turned on. [CHAR LIMIT=NONE] -->
+    <string name="bluetooth_airplane_mode_toast">Bluetooth will stay on during airplane mode</string>
+</resources>
+>>>>>>> 47377cc2aba5c9454428e490444dea7d61a06133

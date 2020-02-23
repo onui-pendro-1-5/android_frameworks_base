@@ -16,6 +16,7 @@
 
 package com.android.internal.util;
 
+import android.annotation.UnsupportedAppUsage;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Bitmap.CompressFormat;
@@ -24,6 +25,8 @@ import android.text.TextUtils;
 import android.util.ArrayMap;
 import android.util.Base64;
 import android.util.Xml;
+
+import libcore.util.HexEncoding;
 
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
@@ -48,6 +51,7 @@ public class XmlUtils {
 
     private static final String STRING_ARRAY_SEPARATOR = ":";
 
+    @UnsupportedAppUsage
     public static void skipCurrentTag(XmlPullParser parser)
             throws XmlPullParserException, IOException {
         int outerDepth = parser.getDepth();
@@ -61,7 +65,7 @@ public class XmlUtils {
     public static final int
     convertValueToList(CharSequence value, String[] options, int defaultValue)
     {
-        if (null != value) {
+        if (!TextUtils.isEmpty(value)) {
             for (int i = 0; i < options.length; i++) {
                 if (value.equals(options[i]))
                     return i;
@@ -71,13 +75,15 @@ public class XmlUtils {
         return defaultValue;
     }
 
+    @UnsupportedAppUsage
     public static final boolean
     convertValueToBoolean(CharSequence value, boolean defaultValue)
     {
         boolean result = false;
 
-        if (null == value)
+        if (TextUtils.isEmpty(value)) {
             return defaultValue;
+        }
 
         if (value.equals("1")
         ||  value.equals("true")
@@ -87,11 +93,13 @@ public class XmlUtils {
         return result;
     }
 
+    @UnsupportedAppUsage
     public static final int
     convertValueToInt(CharSequence charSeq, int defaultValue)
     {
-        if (null == charSeq)
+        if (TextUtils.isEmpty(charSeq)) {
             return defaultValue;
+        }
 
         String nm = charSeq.toString();
 
@@ -134,7 +142,7 @@ public class XmlUtils {
     }
 
     public static int convertValueToUnsignedInt(String value, int defaultValue) {
-        if (null == value) {
+        if (TextUtils.isEmpty(value)) {
             return defaultValue;
         }
 
@@ -183,6 +191,7 @@ public class XmlUtils {
      * @see #writeValueXml
      * @see #readMapXml
      */
+    @UnsupportedAppUsage
     public static final void writeMapXml(Map val, OutputStream out)
             throws XmlPullParserException, java.io.IOException {
         XmlSerializer serializer = new FastXmlSerializer();
@@ -389,16 +398,7 @@ public class XmlUtils {
         final int N = val.length;
         out.attribute(null, "num", Integer.toString(N));
 
-        StringBuilder sb = new StringBuilder(val.length*2);
-        for (int i=0; i<N; i++) {
-            int b = val[i];
-            int h = (b >> 4) & 0x0f;
-            sb.append((char)(h >= 10 ? ('a'+h-10) : ('0'+h)));
-            h = b & 0x0f;
-            sb.append((char)(h >= 10 ? ('a'+h-10) : ('0'+h)));
-        }
-
-        out.text(sb.toString());
+        out.text(HexEncoding.encodeToString(val).toLowerCase());
 
         out.endTag(null, "byte-array");
     }
@@ -732,6 +732,7 @@ public class XmlUtils {
      * #see #writeMapXml
      */
     @SuppressWarnings("unchecked")
+    @UnsupportedAppUsage
     public static final HashMap<String, ?> readMapXml(InputStream in)
     throws XmlPullParserException, java.io.IOException
     {
@@ -1024,7 +1025,9 @@ public class XmlUtils {
                     "Not a number in num attribute in byte-array");
         }
 
-        byte[] array = new byte[num];
+        // 0 len byte array does not have a text in the XML tag. So, initialize to 0 len array.
+        // For all other array lens, HexEncoding.decode() below overrides the array.
+        byte[] array = new byte[0];
 
         int eventType = parser.getEventType();
         do {
@@ -1035,16 +1038,7 @@ public class XmlUtils {
                         throw new XmlPullParserException(
                                 "Invalid value found in byte-array: " + values);
                     }
-                    // This is ugly, but keeping it to mirror the logic in #writeByteArrayXml.
-                    for (int i = 0; i < num; i ++) {
-                        char nibbleHighChar = values.charAt(2 * i);
-                        char nibbleLowChar = values.charAt(2 * i + 1);
-                        int nibbleHigh = nibbleHighChar > 'a' ? (nibbleHighChar - 'a' + 10)
-                                : (nibbleHighChar - '0');
-                        int nibbleLow = nibbleLowChar > 'a' ? (nibbleLowChar - 'a' + 10)
-                                : (nibbleLowChar - '0');
-                        array[i] = (byte) ((nibbleHigh & 0x0F) << 4 | (nibbleLow & 0x0F));
-                    }
+                    array = HexEncoding.decode(values);
                 }
             } else if (eventType == parser.END_TAG) {
                 if (parser.getName().equals(endTag)) {
@@ -1550,6 +1544,7 @@ public class XmlUtils {
         }
     }
 
+    @UnsupportedAppUsage
     public static final void beginDocument(XmlPullParser parser, String firstElementName) throws XmlPullParserException, IOException
     {
         int type;
@@ -1568,6 +1563,7 @@ public class XmlUtils {
         }
     }
 
+    @UnsupportedAppUsage
     public static final void nextElement(XmlPullParser parser) throws XmlPullParserException, IOException
     {
         int type;
@@ -1666,7 +1662,7 @@ public class XmlUtils {
     public static boolean readBooleanAttribute(XmlPullParser in, String name,
             boolean defaultValue) {
         final String value = in.getAttributeValue(null, name);
-        if (value == null) {
+        if (TextUtils.isEmpty(value)) {
             return defaultValue;
         } else {
             return Boolean.parseBoolean(value);
@@ -1703,7 +1699,7 @@ public class XmlUtils {
 
     public static byte[] readByteArrayAttribute(XmlPullParser in, String name) {
         final String value = in.getAttributeValue(null, name);
-        if (value != null) {
+        if (!TextUtils.isEmpty(value)) {
             return Base64.decode(value, Base64.DEFAULT);
         } else {
             return null;

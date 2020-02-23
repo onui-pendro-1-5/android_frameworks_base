@@ -19,7 +19,6 @@ package com.android.systemui.usb;
 import android.annotation.NonNull;
 import android.app.Notification;
 import android.app.Notification.Action;
-import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
@@ -30,6 +29,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.MoveCallback;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.StrictMode;
 import android.os.UserHandle;
 import android.os.storage.DiskInfo;
 import android.os.storage.StorageEventListener;
@@ -357,9 +357,8 @@ public class StorageNotification extends SystemUI {
         final VolumeRecord rec = mStorageManager.findRecordByUuid(vol.getFsUuid());
         final DiskInfo disk = vol.getDisk();
 
-        // Don't annoy when user dismissed in past.  (But make sure the disk is adoptable; we
-        // used to allow snoozing non-adoptable disks too.)
-        if (rec.isSnoozed() && disk.isAdoptable()) {
+        // Don't annoy when user dismissed in past.
+        if (rec.isSnoozed() && (disk.isAdoptable() || disk.isSd())) {
             return null;
         }
 
@@ -398,8 +397,8 @@ public class StorageNotification extends SystemUI {
             if (disk.isUsb()) {
                 builder.setOngoing(true);
             }
-            // Non-adoptable disks can't be snoozed.
-            if (disk.isAdoptable()) {
+
+            if (disk.isAdoptable() || disk.isSd()) {
                 builder.setDeleteIntent(buildSnoozeIntent(vol.getFsUuid()));
             }
 
@@ -637,6 +636,14 @@ public class StorageNotification extends SystemUI {
             final int requestKey = vol.getId().hashCode();
             return PendingIntent.getActivityAsUser(mContext, requestKey, intent,
                     PendingIntent.FLAG_CANCEL_CURRENT, null, UserHandle.CURRENT);
+        } else if (isAutomotive()) {
+            intent.setClassName("com.android.car.settings",
+                    "com.android.car.settings.storage.StorageUnmountReceiver");
+            intent.putExtra(VolumeInfo.EXTRA_VOLUME_ID, vol.getId());
+
+            final int requestKey = vol.getId().hashCode();
+            return PendingIntent.getBroadcastAsUser(mContext, requestKey, intent,
+                    PendingIntent.FLAG_CANCEL_CURRENT, UserHandle.CURRENT);
         } else {
             intent.setClassName("com.android.settings",
                     "com.android.settings.deviceinfo.StorageUnmountReceiver");
@@ -649,11 +656,16 @@ public class StorageNotification extends SystemUI {
     }
 
     private PendingIntent buildBrowsePendingIntent(VolumeInfo vol) {
-        final Intent intent = vol.buildBrowseIntentForUser(vol.getMountUserId());
+        final StrictMode.VmPolicy oldPolicy = StrictMode.allowVmViolations();
+        try {
+            final Intent intent = vol.buildBrowseIntentForUser(vol.getMountUserId());
 
-        final int requestKey = vol.getId().hashCode();
-        return PendingIntent.getActivityAsUser(mContext, requestKey, intent,
-                PendingIntent.FLAG_CANCEL_CURRENT, null, UserHandle.CURRENT);
+            final int requestKey = vol.getId().hashCode();
+            return PendingIntent.getActivityAsUser(mContext, requestKey, intent,
+                    PendingIntent.FLAG_CANCEL_CURRENT, null, UserHandle.CURRENT);
+        } finally {
+            StrictMode.setVmPolicy(oldPolicy);
+        }
     }
 
     private PendingIntent buildVolumeSettingsPendingIntent(VolumeInfo vol) {
@@ -751,6 +763,11 @@ public class StorageNotification extends SystemUI {
         final int requestKey = disk.getId().hashCode();
         return PendingIntent.getActivityAsUser(mContext, requestKey, intent,
                 PendingIntent.FLAG_CANCEL_CURRENT, null, UserHandle.CURRENT);
+    }
+
+    private boolean isAutomotive() {
+        PackageManager packageManager = mContext.getPackageManager();
+        return packageManager.hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE);
     }
 
     private boolean isTv() {

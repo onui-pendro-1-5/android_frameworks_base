@@ -1,4 +1,5 @@
 <resources>
+<<<<<<< HEAD
     <!-- Rotation sensor -->
     <java-symbol type="bool" name="config_useSystemClockforRotationSensor" />
 
@@ -12,10 +13,13 @@
     <!-- Vendor signatures -->
     <java-symbol type="array" name="config_vendorPlatformSignatures" />
 
+=======
+>>>>>>> 47377cc2aba5c9454428e490444dea7d61a06133
     <!-- Device keyhandlers -->
     <java-symbol type="array" name="config_deviceKeyHandlerLibs" />
     <java-symbol type="array" name="config_deviceKeyHandlerClasses" />
 
+<<<<<<< HEAD
     <!-- Whether device ignores the RSSNR signal implementation -->
     <java-symbol type="bool" name="config_ignoreRssnrSignalLevel" />
 
@@ -35,10 +39,13 @@
     <!-- Leds -->
     <java-symbol type="bool" name="config_intrusiveBatteryLed" />
 
+=======
+>>>>>>> 47377cc2aba5c9454428e490444dea7d61a06133
     <!-- Button backlight -->
     <java-symbol type="integer" name="config_buttonBrightnessSettingDefault" />
     <java-symbol type="bool" name="config_deviceHasVariableButtonBrightness" />
 
+<<<<<<< HEAD
     <!-- Device hardware keys -->
     <java-symbol type="integer" name="config_deviceHardwareKeys" />
     <java-symbol type="integer" name="config_deviceHardwareWakeKeys" />
@@ -105,10 +112,30 @@
 
     <!-- Default end time for Ambient Play quiet period -->
     <java-symbol type="integer" name="config_defaultAmbientPlayQuitPeriodEndTime" />
+=======
+    <!-- Proximity check on screen on -->
+    <java-symbol type="bool" name="config_proximityCheckOnWake" />
+
+    <!-- Proximity check timeout -->
+    <java-symbol type="integer" name="config_proximityCheckTimeout" />
+
+    <!-- Proximity check on screen on default -->
+    <java-symbol type="bool" name="config_proximityCheckOnWakeEnabledByDefault" />
+
+    <!-- Whether device has a physical display cutout -->
+    <java-symbol type="bool" name="config_physicalDisplayCutout" />
+
+    <!-- Whether device has a big physical display cutout -->
+    <java-symbol type="bool" name="config_bigPhysicalDisplayCutout" />
+
+    <!-- In-display Fingerprint -->
+    <java-symbol type="bool" name="config_supportsInDisplayFingerprint" />
+>>>>>>> 47377cc2aba5c9454428e490444dea7d61a06133
 
     <!-- Whether to allow process with media UID to access CameraServiceProxy -->
     <java-symbol type="bool" name="config_allowMediaUidForCameraServiceProxy" />
 
+<<<<<<< HEAD
     <!-- Whether to show battery percentage inside icon -->
     <java-symbol type="bool" name="config_battery_percentage_show_inside_icon" />
 
@@ -192,4 +219,40 @@
 
     <!-- Custom styles -->
     <java-symbol type="style" name="CustomThemeDeviceDefaultDialogAlert" />
+=======
+    <!-- Rotation sensor -->
+    <java-symbol type="bool" name="config_useSystemClockforRotationSensor" />
+
+    <!-- Whether device ignores the RSSNR signal implementation -->
+    <java-symbol type="bool" name="config_ignoreRssnrSignalLevel" />
+
+    <!-- Whether to cleanup fingerprints upon connection to the daemon and when user switches -->
+    <java-symbol type="bool" name="config_cleanupUnusedFingerprints" />
+
+    <!-- Whether to use scaled brightness (set -1 to disable) -->
+    <java-symbol type="integer" name="config_useScaleBrightness" />
+
+    <!-- Whether notify fingerprint client of successful cancelled authentication -->
+    <java-symbol type="bool" name="config_notifyClientOnFingerprintCancelSuccess" />
+
+    <!-- Leds -->
+    <java-symbol type="bool" name="config_intrusiveBatteryLed" />
+
+    <!-- Whether to send camera status intent -->
+    <java-symbol type="bool" name="config_sendCameraStatusIntent" />
+
+    <!-- Package Manager -->
+    <java-symbol type="array" name="config_deviceDisabledComponents" />
+    <java-symbol type="array" name="config_globallyDisabledComponents" />
+    <java-symbol type="array" name="config_forceEnabledComponents" />
+
+    <!-- Post reset runnable for all clients -->
+    <java-symbol type="bool" name="config_fingerprintPostResetRunnableForAllClients" />
+
+    <!-- For Pdn throttle feature -->
+    <java-symbol type="bool" name="config_pdp_retry_for_29_33_55_enabled" />
+
+    <!-- Device has OnePlus haptic motor -->
+    <java-symbol type="bool" name="config_hasOnePlusHapticMotor" />
+>>>>>>> 47377cc2aba5c9454428e490444dea7d61a06133
 </resources>

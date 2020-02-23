@@ -18,10 +18,9 @@ package com.android.systemui.statusbar.phone;
 
 import android.graphics.Color;
 import android.os.Trace;
-import android.util.MathUtils;
 
 import com.android.systemui.statusbar.ScrimView;
-import com.android.systemui.statusbar.stack.StackStateAnimator;
+import com.android.systemui.statusbar.notification.stack.StackStateAnimator;
 
 /**
  * Possible states of the ScrimController state machine.
@@ -49,18 +48,15 @@ public enum ScrimState {
                     // fade it out afterwards.
                     mBlankScreen = true;
                 }
+            } else if (previousState == ScrimState.KEYGUARD) {
+                mAnimationDuration = StackStateAnimator.ANIMATION_DURATION_WAKEUP;
             } else {
                 mAnimationDuration = ScrimController.ANIMATION_DURATION;
             }
+            mCurrentInFrontTint = Color.BLACK;
+            mCurrentBehindTint = Color.BLACK;
             mCurrentBehindAlpha = mScrimBehindAlphaKeyguard;
             mCurrentInFrontAlpha = 0;
-        }
-
-        @Override
-        public float getBehindAlpha(float busynessFactor) {
-            return MathUtils.map(0 /* start */, 1 /* stop */,
-                   mScrimBehindAlphaKeyguard, ScrimController.GRADIENT_SCRIM_ALPHA_BUSY,
-                   busynessFactor);
         }
     },
 
@@ -115,7 +111,7 @@ public enum ScrimState {
         }
 
         @Override
-        public float getBehindAlpha(float busyness) {
+        public float getBehindAlpha() {
             return mWallpaperSupportsAmbientMode && !mHasBackdrop ? 0f : 1f;
         }
 
@@ -132,14 +128,23 @@ public enum ScrimState {
         @Override
         public void prepare(ScrimState previousState) {
             mCurrentInFrontAlpha = 0;
-            mCurrentInFrontTint = Color.BLACK;
             mCurrentBehindTint = Color.BLACK;
+            mCurrentInFrontTint = Color.BLACK;
             mBlankScreen = mDisplayRequiresBlanking;
+            mAnimationDuration = mWakeLockScreenSensorActive
+                    ? ScrimController.ANIMATION_DURATION_LONG : ScrimController.ANIMATION_DURATION;
+
+            // Wake sensor will show the wallpaper, let's fade from black. Otherwise it will
+            // feel like the screen is flashing if the wallpaper is light.
+            if (mWakeLockScreenSensorActive && previousState == AOD) {
+                updateScrimColor(mScrimBehind, 1f /* alpha */, Color.BLACK);
+            }
         }
 
         @Override
-        public float getBehindAlpha(float busyness) {
-            return mWallpaperSupportsAmbientMode && !mHasBackdrop ? 0f : 1f;
+        public float getBehindAlpha() {
+            return mWakeLockScreenSensorActive ? ScrimController.WAKE_SENSOR_SCRIM_ALPHA
+                    : AOD.getBehindAlpha();
         }
     },
 
@@ -151,7 +156,10 @@ public enum ScrimState {
         public void prepare(ScrimState previousState) {
             mCurrentBehindAlpha = 0;
             mCurrentInFrontAlpha = 0;
-            mAnimationDuration = StatusBar.FADE_KEYGUARD_DURATION;
+            mAnimationDuration = mKeyguardFadingAway
+                    ? mKeyguardFadingAwayDuration
+                    : StatusBar.FADE_KEYGUARD_DURATION;
+
             mAnimateChange = !mLaunchingAffordanceWithPreview;
 
             if (previousState == ScrimState.AOD) {
@@ -167,6 +175,20 @@ public enum ScrimState {
                 mCurrentBehindTint = Color.TRANSPARENT;
                 mBlankScreen = false;
             }
+        }
+    },
+
+    /**
+     * Unlocked with a bubble expanded.
+     */
+    BUBBLE_EXPANDED(7) {
+        @Override
+        public void prepare(ScrimState previousState) {
+            mCurrentInFrontTint = Color.TRANSPARENT;
+            mCurrentBehindTint = Color.TRANSPARENT;
+            mAnimationDuration = ScrimController.ANIMATION_DURATION;
+            mCurrentBehindAlpha = ScrimController.GRADIENT_SCRIM_ALPHA_BUSY;
+            mBlankScreen = false;
         }
     };
 
@@ -187,6 +209,9 @@ public enum ScrimState {
     int mIndex;
     boolean mHasBackdrop;
     boolean mLaunchingAffordanceWithPreview;
+    boolean mWakeLockScreenSensorActive;
+    boolean mKeyguardFadingAway;
+    long mKeyguardFadingAwayDuration;
 
     ScrimState(int index) {
         mIndex = index;
@@ -210,7 +235,7 @@ public enum ScrimState {
         return mCurrentInFrontAlpha;
     }
 
-    public float getBehindAlpha(float busyness) {
+    public float getBehindAlpha() {
         return mCurrentBehindAlpha;
     }
 
@@ -269,5 +294,14 @@ public enum ScrimState {
 
     public void setHasBackdrop(boolean hasBackdrop) {
         mHasBackdrop = hasBackdrop;
+    }
+
+    public void setWakeLockScreenSensorActive(boolean active) {
+        mWakeLockScreenSensorActive = active;
+    }
+
+    public void setKeyguardFadingAway(boolean fadingAway, long duration) {
+        mKeyguardFadingAway = fadingAway;
+        mKeyguardFadingAwayDuration = duration;
     }
 }

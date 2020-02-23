@@ -19,11 +19,14 @@ package com.android.internal.widget;
 import android.annotation.Nullable;
 import android.content.Context;
 import android.util.AttributeSet;
+import android.view.NotificationHeaderView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.RemoteViews;
+
+import java.util.ArrayList;
 
 /**
  * A TextView that can float around an image on the end.
@@ -37,9 +40,11 @@ public class MediaNotificationView extends FrameLayout {
     private final int mNotificationContentImageMarginEnd;
     private ImageView mRightIcon;
     private View mActions;
-    private View mHeader;
+    private NotificationHeaderView mHeader;
     private View mMainColumn;
+    private View mMediaContent;
     private int mImagePushIn;
+    private ArrayList<VisibilityChangeListener> mListeners;
 
     public MediaNotificationView(Context context) {
         this(context, null);
@@ -70,7 +75,7 @@ public class MediaNotificationView extends FrameLayout {
                     (MarginLayoutParams) mRightIcon.getLayoutParams();
             int imageEndMargin = layoutParams.getMarginEnd();
             size -= imageEndMargin;
-            int fullHeight = getMeasuredHeight();
+            int fullHeight = mMediaContent.getMeasuredHeight();
             if (size > fullHeight) {
                 size = fullHeight;
             } else if (size < fullHeight) {
@@ -93,7 +98,14 @@ public class MediaNotificationView extends FrameLayout {
                 mMainColumn.setLayoutParams(params);
                 reMeasure = true;
             }
-            int headerMarginEnd = size + imageEndMargin;
+            // margin for the entire header line
+            int headerMarginEnd = imageEndMargin;
+            // margin for the header text (not including the expand button and other icons)
+            int headerTextMarginEnd = size + imageEndMargin;
+            if (headerTextMarginEnd != mHeader.getHeaderTextMarginEnd()) {
+                mHeader.setHeaderTextMarginEnd(headerTextMarginEnd);
+                reMeasure = true;
+            }
             params = (MarginLayoutParams) mHeader.getLayoutParams();
             if (params.getMarginEnd() != headerMarginEnd) {
                 params.setMarginEnd(headerMarginEnd);
@@ -117,6 +129,9 @@ public class MediaNotificationView extends FrameLayout {
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
         super.onLayout(changed, left, top, right, bottom);
         if (mImagePushIn > 0) {
+            if (this.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL) {
+                mImagePushIn *= -1;
+            }
             mRightIcon.layout(mRightIcon.getLeft() + mImagePushIn, mRightIcon.getTop(),
                     mRightIcon.getRight()  + mImagePushIn, mRightIcon.getBottom());
         }
@@ -154,5 +169,52 @@ public class MediaNotificationView extends FrameLayout {
         mActions = findViewById(com.android.internal.R.id.media_actions);
         mHeader = findViewById(com.android.internal.R.id.notification_header);
         mMainColumn = findViewById(com.android.internal.R.id.notification_main_column);
+        mMediaContent = findViewById(com.android.internal.R.id.notification_media_content);
+    }
+
+    @Override
+    public void onVisibilityAggregated(boolean isVisible) {
+        super.onVisibilityAggregated(isVisible);
+        if (mListeners != null) {
+            for (int i = 0; i < mListeners.size(); i++) {
+                mListeners.get(i).onAggregatedVisibilityChanged(isVisible);
+            }
+        }
+    }
+
+    /**
+     * Add a listener to receive updates on the visibility of this view
+     *
+     * @param listener The listener to add.
+     */
+    public void addVisibilityListener(VisibilityChangeListener listener) {
+        if (mListeners == null) {
+            mListeners = new ArrayList<>();
+        }
+        if (!mListeners.contains(listener)) {
+            mListeners.add(listener);
+        }
+    }
+
+    /**
+     * Remove the specified listener
+     *
+     * @param listener The listener to remove.
+     */
+    public void removeVisibilityListener(VisibilityChangeListener listener) {
+        if (mListeners != null) {
+            mListeners.remove(listener);
+        }
+    }
+
+    /**
+     * Interface for receiving updates when the view's visibility changes
+     */
+    public interface VisibilityChangeListener {
+        /**
+         * Method called when the visibility of this view has changed
+         * @param isVisible true if the view is now visible
+         */
+        void onAggregatedVisibilityChanged(boolean isVisible);
     }
 }

@@ -18,22 +18,26 @@ package com.android.systemui.doze;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.app.AlarmManager;
-import android.app.Instrumentation;
+import android.hardware.Sensor;
+import android.hardware.display.AmbientDisplayConfiguration;
 import android.os.Handler;
 import android.os.Looper;
-import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 import android.testing.AndroidTestingRunner;
 import android.testing.TestableLooper.RunWithLooper;
 
-import com.android.internal.hardware.AmbientDisplayConfiguration;
+import androidx.test.filters.SmallTest;
+
 import com.android.systemui.SysuiTestCase;
+import com.android.systemui.dock.DockManager;
 import com.android.systemui.statusbar.phone.DozeParameters;
 import com.android.systemui.util.wakelock.WakeLock;
 import com.android.systemui.util.wakelock.WakeLockFake;
@@ -41,12 +45,10 @@ import com.android.systemui.utils.hardware.FakeSensorManager;
 
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 @SmallTest
-@Ignore("failing")
 @RunWith(AndroidTestingRunner.class)
 @RunWithLooper(setAsMainLooper = true)
 public class DozeTriggersTest extends SysuiTestCase {
@@ -56,9 +58,10 @@ public class DozeTriggersTest extends SysuiTestCase {
     private AmbientDisplayConfiguration mConfig;
     private DozeParameters mParameters;
     private FakeSensorManager mSensors;
+    private Sensor mTapSensor;
     private WakeLock mWakeLock;
-    private Instrumentation mInstrumentation;
     private AlarmManager mAlarmManager;
+    private DockManager mDockManagerFake;
 
     @BeforeClass
     public static void setupSuite() {
@@ -68,17 +71,19 @@ public class DozeTriggersTest extends SysuiTestCase {
 
     @Before
     public void setUp() throws Exception {
-        mInstrumentation = InstrumentationRegistry.getInstrumentation();
         mMachine = mock(DozeMachine.class);
         mAlarmManager = mock(AlarmManager.class);
-        mHost = new DozeHostFake();
+        mHost = spy(new DozeHostFake());
         mConfig = DozeConfigurationUtil.createMockConfig();
         mParameters = DozeConfigurationUtil.createMockParameters();
-        mSensors = new FakeSensorManager(mContext);
+        mSensors = spy(new FakeSensorManager(mContext));
+        mTapSensor = mSensors.getFakeTapSensor().getSensor();
         mWakeLock = new WakeLockFake();
+        mDockManagerFake = mock(DockManager.class);
 
         mTriggers = new DozeTriggers(mContext, mMachine, mHost, mAlarmManager, mConfig, mParameters,
-                mSensors, Handler.createAsync(Looper.myLooper()), mWakeLock, true);
+                mSensors, Handler.createAsync(Looper.myLooper()), mWakeLock, true,
+                mDockManagerFake);
     }
 
     @Test
@@ -87,19 +92,45 @@ public class DozeTriggersTest extends SysuiTestCase {
 
         mTriggers.transitionTo(DozeMachine.State.UNINITIALIZED, DozeMachine.State.INITIALIZED);
         mTriggers.transitionTo(DozeMachine.State.INITIALIZED, DozeMachine.State.DOZE);
+        clearInvocations(mMachine);
 
-        mHost.callback.onNotificationHeadsUp();
-
+        mHost.callback.onNotificationAlerted(null /* pulseSuppressedListener */);
         mSensors.getMockProximitySensor().sendProximityResult(false); /* Near */
 
         verify(mMachine, never()).requestState(any());
         verify(mMachine, never()).requestPulse(anyInt());
 
-        mHost.callback.onNotificationHeadsUp();
-
+        mHost.callback.onNotificationAlerted(null /* pulseSuppressedListener */);
         mSensors.getMockProximitySensor().sendProximityResult(true); /* Far */
 
         verify(mMachine).requestPulse(anyInt());
     }
 
+    @Test
+    public void testTransitionTo_disablesAndEnablesTouchSensors() {
+        when(mMachine.getState()).thenReturn(DozeMachine.State.DOZE);
+
+        mTriggers.transitionTo(DozeMachine.State.INITIALIZED, DozeMachine.State.DOZE);
+        verify(mSensors).requestTriggerSensor(any(), eq(mTapSensor));
+
+        clearInvocations(mSensors);
+        mTriggers.transitionTo(DozeMachine.State.DOZE,
+                DozeMachine.State.DOZE_REQUEST_PULSE);
+        mTriggers.transitionTo(DozeMachine.State.DOZE_REQUEST_PULSE,
+                DozeMachine.State.DOZE_PULSING);
+        verify(mSensors).cancelTriggerSensor(any(), eq(mTapSensor));
+
+        clearInvocations(mSensors);
+        mTriggers.transitionTo(DozeMachine.State.DOZE_PULSING, DozeMachine.State.DOZE_PULSE_DONE);
+        verify(mSensors).requestTriggerSensor(any(), eq(mTapSensor));
+    }
+
+    @Test
+    public void testDockEventListener_registerAndUnregister() {
+        mTriggers.transitionTo(DozeMachine.State.UNINITIALIZED, DozeMachine.State.INITIALIZED);
+        verify(mDockManagerFake).addListener(any());
+
+        mTriggers.transitionTo(DozeMachine.State.DOZE, DozeMachine.State.FINISH);
+        verify(mDockManagerFake).removeListener(any());
+    }
 }

@@ -19,19 +19,20 @@ package com.android.systemui.pip.phone;
 import static android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK;
 import static android.content.Intent.FLAG_ACTIVITY_NEW_TASK;
 import static android.provider.Settings.ACTION_PICTURE_IN_PICTURE_SETTINGS;
+import static android.view.accessibility.AccessibilityManager.FLAG_CONTENT_CONTROLS;
+import static android.view.accessibility.AccessibilityManager.FLAG_CONTENT_ICONS;
 
 import static com.android.systemui.pip.phone.PipMenuActivityController.EXTRA_ACTIONS;
 import static com.android.systemui.pip.phone.PipMenuActivityController.EXTRA_ALLOW_TIMEOUT;
 import static com.android.systemui.pip.phone.PipMenuActivityController.EXTRA_CONTROLLER_MESSENGER;
-import static com.android.systemui.pip.phone.PipMenuActivityController.EXTRA_WILL_RESIZE_MENU;
 import static com.android.systemui.pip.phone.PipMenuActivityController.EXTRA_DISMISS_FRACTION;
-import static com.android.systemui.pip.phone.PipMenuActivityController.EXTRA_MOVEMENT_BOUNDS;
 import static com.android.systemui.pip.phone.PipMenuActivityController.EXTRA_MENU_STATE;
+import static com.android.systemui.pip.phone.PipMenuActivityController.EXTRA_MOVEMENT_BOUNDS;
 import static com.android.systemui.pip.phone.PipMenuActivityController.EXTRA_STACK_BOUNDS;
-
-import static com.android.systemui.pip.phone.PipMenuActivityController.MENU_STATE_NONE;
+import static com.android.systemui.pip.phone.PipMenuActivityController.EXTRA_WILL_RESIZE_MENU;
 import static com.android.systemui.pip.phone.PipMenuActivityController.MENU_STATE_CLOSE;
 import static com.android.systemui.pip.phone.PipMenuActivityController.MENU_STATE_FULL;
+import static com.android.systemui.pip.phone.PipMenuActivityController.MENU_STATE_NONE;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
@@ -47,7 +48,6 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.ParceledListSlice;
 import android.graphics.Color;
-import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -63,17 +63,15 @@ import android.util.Pair;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.WindowManager.LayoutParams;
+import android.view.accessibility.AccessibilityManager;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 
 import com.android.systemui.Interpolators;
 import com.android.systemui.R;
-import com.android.systemui.recents.events.EventBus;
-import com.android.systemui.recents.events.component.HidePipMenuEvent;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -92,9 +90,10 @@ public class PipMenuActivity extends Activity {
     public static final int MESSAGE_UPDATE_ACTIONS = 4;
     public static final int MESSAGE_UPDATE_DISMISS_FRACTION = 5;
     public static final int MESSAGE_ANIMATION_ENDED = 6;
+    public static final int MESSAGE_TOUCH_EVENT = 7;
 
-    private static final long INITIAL_DISMISS_DELAY = 3500;
-    private static final long POST_INTERACTION_DISMISS_DELAY = 2000;
+    private static final int INITIAL_DISMISS_DELAY = 3500;
+    private static final int POST_INTERACTION_DISMISS_DELAY = 2000;
     private static final long MENU_FADE_DURATION = 125;
 
     private static final float MENU_BACKGROUND_ALPHA = 0.3f;
@@ -108,6 +107,7 @@ public class PipMenuActivity extends Activity {
 
     private final List<RemoteAction> mActions = new ArrayList<>();
 
+    private AccessibilityManager mAccessibilityManager;
     private View mViewRoot;
     private Drawable mBackgroundDrawable;
     private View mMenuContainer;
@@ -128,10 +128,6 @@ public class PipMenuActivity extends Activity {
                 }
             };
 
-    private PipTouchState mTouchState;
-    private PointF mDownPosition = new PointF();
-    private PointF mDownDelta = new PointF();
-    private ViewConfiguration mViewConfig;
     private Handler mHandler = new Handler();
     private Messenger mToControllerMessenger;
     private Messenger mMessenger = new Messenger(new Handler() {
@@ -151,7 +147,7 @@ public class PipMenuActivity extends Activity {
                     cancelDelayedFinish();
                     break;
                 case MESSAGE_HIDE_MENU:
-                    hideMenu();
+                    hideMenu((Runnable) msg.obj);
                     break;
                 case MESSAGE_UPDATE_ACTIONS: {
                     final Bundle data = (Bundle) msg.obj;
@@ -169,6 +165,12 @@ public class PipMenuActivity extends Activity {
                     mAllowTouches = true;
                     break;
                 }
+
+                case MESSAGE_TOUCH_EVENT: {
+                    final MotionEvent ev = (MotionEvent) msg.obj;
+                    dispatchTouchEvent(ev);
+                    break;
+                }
             }
         }
     });
@@ -184,57 +186,32 @@ public class PipMenuActivity extends Activity {
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         // Set the flags to allow us to watch for outside touches and also hide the menu and start
         // manipulating the PIP in the same touch gesture
-        mViewConfig = ViewConfiguration.get(this);
-        mTouchState = new PipTouchState(mViewConfig, mHandler, () -> {
-            if (mMenuState == MENU_STATE_CLOSE) {
-                showPipMenu();
-            } else {
-                expandPip();
-            }
-        });
-        getWindow().addFlags(LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH | LayoutParams.FLAG_SLIPPERY);
+        getWindow().addFlags(LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH);
 
         super.onCreate(savedInstanceState);
         setContentView(R.layout.pip_menu_activity);
 
+        mAccessibilityManager = getSystemService(AccessibilityManager.class);
         mBackgroundDrawable = new ColorDrawable(Color.BLACK);
         mBackgroundDrawable.setAlpha(0);
         mViewRoot = findViewById(R.id.background);
         mViewRoot.setBackground(mBackgroundDrawable);
         mMenuContainer = findViewById(R.id.menu_container);
         mMenuContainer.setAlpha(0);
-        mMenuContainer.setOnTouchListener((v, event) -> {
-            mTouchState.onTouchEvent(event);
-            switch (event.getAction()) {
-                case MotionEvent.ACTION_UP:
-                    if (mTouchState.isDoubleTap() || mMenuState == MENU_STATE_FULL) {
-                        // Expand to fullscreen if this is a double tap or we are already expanded
-                        expandPip();
-                    } else if (!mTouchState.isWaitingForDoubleTap()) {
-                        // User has stalled long enough for this not to be a drag or a double tap,
-                        // just expand the menu if necessary
-                        if (mMenuState == MENU_STATE_CLOSE) {
-                            showPipMenu();
-                        }
-                    } else {
-                        // Next touch event _may_ be the second tap for the double-tap, schedule a
-                        // fallback runnable to trigger the menu if no touch event occurs before the
-                        // next tap
-                        mTouchState.scheduleDoubleTapTimeoutCallback();
-                    }
-                    break;
-            }
-            return true;
-        });
         mSettingsButton = findViewById(R.id.settings);
         mSettingsButton.setAlpha(0);
         mSettingsButton.setOnClickListener((v) -> {
-            showSettings();
+            if (v.getAlpha() != 0) {
+                showSettings();
+            }
         });
         mDismissButton = findViewById(R.id.dismiss);
         mDismissButton.setAlpha(0);
-        mDismissButton.setOnClickListener((v) -> {
-            dismissPip();
+        mDismissButton.setOnClickListener(v -> dismissPip());
+        findViewById(R.id.expand_button).setOnClickListener(v -> {
+            if (mMenuContainer.getAlpha() != 0) {
+                expandPip();
+            }
         });
         mActionsGroup = findViewById(R.id.actions_group);
         mBetweenActionPaddingLand = getResources().getDimensionPixelSize(
@@ -273,7 +250,6 @@ public class PipMenuActivity extends Activity {
         super.onStop();
 
         cancelDelayedFinish();
-        EventBus.getDefault().unregister(this);
     }
 
     @Override
@@ -295,27 +271,14 @@ public class PipMenuActivity extends Activity {
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
         if (!mAllowTouches) {
-            return super.dispatchTouchEvent(ev);
+            return false;
         }
 
         // On the first action outside the window, hide the menu
         switch (ev.getAction()) {
             case MotionEvent.ACTION_OUTSIDE:
                 hideMenu();
-                break;
-            case MotionEvent.ACTION_DOWN:
-                mDownPosition.set(ev.getX(), ev.getY());
-                mDownDelta.set(0f, 0f);
-                break;
-            case MotionEvent.ACTION_MOVE:
-                mDownDelta.set(ev.getX() - mDownPosition.x, ev.getY() - mDownPosition.y);
-                if (mDownDelta.length() > mViewConfig.getScaledTouchSlop()
-                        && mMenuState != MENU_STATE_NONE) {
-                    // Restore the input consumer and let that drive the movement of this menu
-                    notifyRegisterInputConsumer();
-                    cancelDelayedFinish();
-                }
-                break;
+                return true;
         }
         return super.dispatchTouchEvent(ev);
     }
@@ -331,19 +294,6 @@ public class PipMenuActivity extends Activity {
     @Override
     public void setTaskDescription(ActivityManager.TaskDescription taskDescription) {
         // Do nothing
-    }
-
-    public final void onBusEvent(HidePipMenuEvent event) {
-        if (mMenuState != MENU_STATE_NONE) {
-            // If the menu is visible in either the closed or full state, then hide the menu and
-            // trigger the animation trigger afterwards
-            event.getAnimationTrigger().increment();
-            hideMenu(() -> {
-                mHandler.post(() -> {
-                    event.getAnimationTrigger().decrement();
-                });
-            }, true /* notifyMenuVisibility */, false /* isDismissing */);
-        }
     }
 
     private void showMenu(int menuState, Rect stackBounds, Rect movementBounds,
@@ -391,13 +341,15 @@ public class PipMenuActivity extends Activity {
             if (allowMenuTimeout) {
                 repostDelayedFinish(POST_INTERACTION_DISMISS_DELAY);
             }
-            notifyUnregisterInputConsumer();
         }
     }
 
     private void hideMenu() {
-        hideMenu(null /* animationFinishedRunnable */, true /* notifyMenuVisibility */,
-                false /* isDismissing */);
+        hideMenu(null);
+    }
+
+    private void hideMenu(Runnable animationEndCallback) {
+        hideMenu(animationEndCallback, true /* notifyMenuVisibility */, false /* isDismissing */);
     }
 
     private void hideMenu(final Runnable animationFinishedRunnable, boolean notifyMenuVisibility,
@@ -447,9 +399,6 @@ public class PipMenuActivity extends Activity {
             return;
         }
         notifyActivityCallback(mMessenger);
-
-        // Register for HidePipMenuEvents once we notify the controller of this activity
-        EventBus.getDefault().register(this);
 
         ParceledListSlice actions = intent.getParcelableExtra(EXTRA_ACTIONS);
         if (actions != null) {
@@ -516,11 +465,13 @@ public class PipMenuActivity extends Activity {
                     actionView.setContentDescription(action.getContentDescription());
                     if (action.isEnabled()) {
                         actionView.setOnClickListener(v -> {
-                            try {
-                                action.getActionIntent().send();
-                            } catch (CanceledException e) {
-                                Log.w(TAG, "Failed to send action", e);
-                            }
+                            mHandler.post(() -> {
+                                try {
+                                    action.getActionIntent().send();
+                                } catch (CanceledException e) {
+                                    Log.w(TAG, "Failed to send action", e);
+                                }
+                            });
                         });
                     }
                     actionView.setEnabled(action.isEnabled());
@@ -564,18 +515,6 @@ public class PipMenuActivity extends Activity {
         mBackgroundDrawable.setAlpha(alpha);
     }
 
-    private void notifyRegisterInputConsumer() {
-        Message m = Message.obtain();
-        m.what = PipMenuActivityController.MESSAGE_REGISTER_INPUT_CONSUMER;
-        sendMessage(m, "Could not notify controller to register input consumer");
-    }
-
-    private void notifyUnregisterInputConsumer() {
-        Message m = Message.obtain();
-        m.what = PipMenuActivityController.MESSAGE_UNREGISTER_INPUT_CONSUMER;
-        sendMessage(m, "Could not notify controller to unregister input consumer");
-    }
-
     private void notifyMenuStateChange(int menuState) {
         mMenuState = menuState;
         Message m = Message.obtain();
@@ -593,11 +532,6 @@ public class PipMenuActivity extends Activity {
         }, false /* notifyMenuVisibility */, false /* isDismissing */);
     }
 
-    private void minimizePip() {
-        sendEmptyMessage(PipMenuActivityController.MESSAGE_MINIMIZE_PIP,
-                "Could not notify controller to minimize PIP");
-    }
-
     private void dismissPip() {
         // Do not notify menu visibility when hiding the menu, the controller will do this when it
         // handles the message
@@ -605,12 +539,6 @@ public class PipMenuActivity extends Activity {
             sendEmptyMessage(PipMenuActivityController.MESSAGE_DISMISS_PIP,
                     "Could not notify controller to dismiss PIP");
         }, false /* notifyMenuVisibility */, true /* isDismissing */);
-    }
-
-    private void showPipMenu() {
-        Message m = Message.obtain();
-        m.what = PipMenuActivityController.MESSAGE_SHOW_MENU;
-        sendMessage(m, "Could not notify controller to show PIP menu");
     }
 
     private void showSettings() {
@@ -654,8 +582,10 @@ public class PipMenuActivity extends Activity {
         mHandler.removeCallbacks(mFinishRunnable);
     }
 
-    private void repostDelayedFinish(long delay) {
+    private void repostDelayedFinish(int delay) {
+        int recommendedTimeout = mAccessibilityManager.getRecommendedTimeoutMillis(delay,
+                FLAG_CONTENT_ICONS | FLAG_CONTENT_CONTROLS);
         mHandler.removeCallbacks(mFinishRunnable);
-        mHandler.postDelayed(mFinishRunnable, delay);
+        mHandler.postDelayed(mFinishRunnable, recommendedTimeout);
     }
 }

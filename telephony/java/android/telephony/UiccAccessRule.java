@@ -19,6 +19,7 @@ import android.annotation.Nullable;
 import android.annotation.SystemApi;
 import android.content.pm.PackageInfo;
 import android.content.pm.Signature;
+import android.content.pm.SigningInfo;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.text.TextUtils;
@@ -47,7 +48,7 @@ public final class UiccAccessRule implements Parcelable {
 
     private static final int ENCODING_VERSION = 1;
 
-    public static final Creator<UiccAccessRule> CREATOR = new Creator<UiccAccessRule>() {
+    public static final @android.annotation.NonNull Creator<UiccAccessRule> CREATOR = new Creator<UiccAccessRule>() {
         @Override
         public UiccAccessRule createFromParcel(Parcel in) {
             return new UiccAccessRule(in);
@@ -168,17 +169,28 @@ public final class UiccAccessRule implements Parcelable {
      *
      * @param packageInfo package info fetched from
      *     {@link android.content.pm.PackageManager#getPackageInfo}.
-     *     {@link android.content.pm.PackageManager#GET_SIGNATURES} must have been passed in.
+     *     {@link android.content.pm.PackageManager#GET_SIGNING_CERTIFICATES} must have been
+     *         passed in.
      * @return either {@link TelephonyManager#CARRIER_PRIVILEGE_STATUS_HAS_ACCESS} or
      *     {@link TelephonyManager#CARRIER_PRIVILEGE_STATUS_NO_ACCESS}.
      */
     public int getCarrierPrivilegeStatus(PackageInfo packageInfo) {
-        if (packageInfo.signatures == null || packageInfo.signatures.length == 0) {
-            throw new IllegalArgumentException(
-                    "Must use GET_SIGNATURES when looking up package info");
+        Signature[] signatures = packageInfo.signatures;
+        SigningInfo sInfo = packageInfo.signingInfo;
+
+        if (sInfo != null) {
+            signatures = sInfo.getSigningCertificateHistory();
+            if (sInfo.hasMultipleSigners()) {
+                signatures = sInfo.getApkContentsSigners();
+            }
         }
 
-        for (Signature sig : packageInfo.signatures) {
+        if (signatures == null || signatures.length == 0) {
+            throw new IllegalArgumentException(
+                    "Must use GET_SIGNING_CERTIFICATES when looking up package info");
+        }
+
+        for (Signature sig : signatures) {
             int accessStatus = getCarrierPrivilegeStatus(sig, packageInfo.packageName);
             if (accessStatus != TelephonyManager.CARRIER_PRIVILEGE_STATUS_NO_ACCESS) {
                 return accessStatus;

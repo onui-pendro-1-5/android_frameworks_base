@@ -208,6 +208,10 @@ public abstract class WindowOrientationListener {
         }
     }
 
+    public Handler getHandler() {
+        return mHandler;
+    }
+
     /**
      * Sets the current rotation.
      *

@@ -16,7 +16,11 @@
 
 package com.android.systemui.shared.recents.model;
 
+import static android.view.Display.DEFAULT_DISPLAY;
+
+import android.app.ActivityManager;
 import android.app.ActivityManager.TaskDescription;
+import android.app.TaskInfo;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
@@ -31,13 +35,14 @@ import java.util.ArrayList;
 import java.util.Objects;
 
 /**
- * A task represents the top most task in the system's task stack.
+ * A task in the recent tasks list.
  */
 public class Task {
 
     public static final String TAG = "Task";
 
     /* Task callbacks */
+    @Deprecated
     public interface TaskCallbacks {
         /* Notifies when a task has been bound */
         void onTaskDataLoaded(Task task, ThumbnailData thumbnailData);
@@ -60,10 +65,32 @@ public class Task {
         @ViewDebug.ExportedProperty(category="recents")
         public long lastActiveTime;
 
+        /**
+         * The id of the task was running from which display.
+         */
+        @ViewDebug.ExportedProperty(category = "recents")
+        public final int displayId;
+
         // The source component name which started this task
         public final ComponentName sourceComponent;
 
         private int mHashCode;
+
+        public TaskKey(TaskInfo t) {
+            ComponentName sourceComponent = t.origActivity != null
+                    // Activity alias if there is one
+                    ? t.origActivity
+                    // The real activity if there is no alias (or the target if there is one)
+                    : t.realActivity;
+            this.id = t.taskId;
+            this.windowingMode = t.configuration.windowConfiguration.getWindowingMode();
+            this.baseIntent = t.baseIntent;
+            this.sourceComponent = sourceComponent;
+            this.userId = t.userId;
+            this.lastActiveTime = t.lastActiveTime;
+            this.displayId = t.displayId;
+            updateHashCode();
+        }
 
         public TaskKey(int id, int windowingMode, Intent intent,
                 ComponentName sourceComponent, int userId, long lastActiveTime) {
@@ -73,6 +100,19 @@ public class Task {
             this.sourceComponent = sourceComponent;
             this.userId = userId;
             this.lastActiveTime = lastActiveTime;
+            this.displayId = DEFAULT_DISPLAY;
+            updateHashCode();
+        }
+
+        public TaskKey(int id, int windowingMode, Intent intent,
+                ComponentName sourceComponent, int userId, long lastActiveTime, int displayId) {
+            this.id = id;
+            this.windowingMode = windowingMode;
+            this.baseIntent = intent;
+            this.sourceComponent = sourceComponent;
+            this.userId = userId;
+            this.lastActiveTime = lastActiveTime;
+            this.displayId = displayId;
             updateHashCode();
         }
 
@@ -125,6 +165,7 @@ public class Task {
     /**
      * The temporary sort index in the stack, used when ordering the stack.
      */
+    @Deprecated
     public int temporarySortIndexInStack;
 
     /**
@@ -134,6 +175,7 @@ public class Task {
     public Drawable icon;
     public ThumbnailData thumbnail;
     @ViewDebug.ExportedProperty(category="recents")
+    @Deprecated
     public String title;
     @ViewDebug.ExportedProperty(category="recents")
     public String titleDescription;
@@ -142,6 +184,7 @@ public class Task {
     @ViewDebug.ExportedProperty(category="recents")
     public int colorBackground;
     @ViewDebug.ExportedProperty(category="recents")
+    @Deprecated
     public boolean useLightOnPrimaryColor;
 
     /**
@@ -153,10 +196,13 @@ public class Task {
      * The state isLaunchTarget will be set for the correct task upon launching Recents.
      */
     @ViewDebug.ExportedProperty(category="recents")
+    @Deprecated
     public boolean isLaunchTarget;
     @ViewDebug.ExportedProperty(category="recents")
+    @Deprecated
     public boolean isStackTask;
     @ViewDebug.ExportedProperty(category="recents")
+    @Deprecated
     public boolean isSystemApp;
     @ViewDebug.ExportedProperty(category="recents")
     public boolean isDockable;
@@ -165,6 +211,7 @@ public class Task {
      * Resize mode. See {@link ActivityInfo#resizeMode}.
      */
     @ViewDebug.ExportedProperty(category="recents")
+    @Deprecated
     public int resizeMode;
 
     @ViewDebug.ExportedProperty(category="recents")
@@ -173,12 +220,42 @@ public class Task {
     @ViewDebug.ExportedProperty(category="recents")
     public boolean isLocked;
 
+    @Deprecated
     private ArrayList<TaskCallbacks> mCallbacks = new ArrayList<>();
 
     public Task() {
         // Do nothing
     }
 
+    /**
+     * Creates a task object from the provided task info
+     */
+    public static Task from(TaskKey taskKey, TaskInfo taskInfo, boolean isLocked) {
+        ActivityManager.TaskDescription td = taskInfo.taskDescription;
+        return new Task(taskKey,
+                td != null ? td.getPrimaryColor() : 0,
+                td != null ? td.getBackgroundColor() : 0,
+                taskInfo.supportsSplitScreenMultiWindow, isLocked, td, taskInfo.topActivity);
+    }
+
+    public Task(TaskKey key) {
+        this.key = key;
+        this.taskDescription = new TaskDescription();
+    }
+
+    public Task(TaskKey key, int colorPrimary, int colorBackground,
+            boolean isDockable, boolean isLocked, TaskDescription taskDescription,
+            ComponentName topActivity) {
+        this.key = key;
+        this.colorPrimary = colorPrimary;
+        this.colorBackground = colorBackground;
+        this.taskDescription = taskDescription;
+        this.isDockable = isDockable;
+        this.isLocked = isLocked;
+        this.topActivity = topActivity;
+    }
+
+    @Deprecated
     public Task(TaskKey key, Drawable icon, ThumbnailData thumbnail, String title,
             String titleDescription, int colorPrimary, int colorBackground, boolean isLaunchTarget,
             boolean isStackTask, boolean isSystemApp, boolean isDockable,
@@ -206,6 +283,7 @@ public class Task {
     /**
      * Copies the metadata from another task, but retains the current callbacks.
      */
+    @Deprecated
     public void copyFrom(Task o) {
         this.key = o.key;
         this.icon = o.icon;
@@ -228,6 +306,7 @@ public class Task {
     /**
      * Add a callback.
      */
+    @Deprecated
     public void addCallback(TaskCallbacks cb) {
         if (!mCallbacks.contains(cb)) {
             mCallbacks.add(cb);
@@ -237,11 +316,13 @@ public class Task {
     /**
      * Remove a callback.
      */
+    @Deprecated
     public void removeCallback(TaskCallbacks cb) {
         mCallbacks.remove(cb);
     }
 
     /** Updates the task's windowing mode. */
+    @Deprecated
     public void setWindowingMode(int windowingMode) {
         key.setWindowingMode(windowingMode);
         int callbackCount = mCallbacks.size();
@@ -251,6 +332,7 @@ public class Task {
     }
 
     /** Notifies the callback listeners that this task has been loaded */
+    @Deprecated
     public void notifyTaskDataLoaded(ThumbnailData thumbnailData, Drawable applicationIcon) {
         this.icon = applicationIcon;
         this.thumbnail = thumbnailData;
@@ -261,6 +343,7 @@ public class Task {
     }
 
     /** Notifies the callback listeners that this task has been unloaded */
+    @Deprecated
     public void notifyTaskDataUnloaded(Drawable defaultApplicationIcon) {
         icon = defaultApplicationIcon;
         thumbnail = null;

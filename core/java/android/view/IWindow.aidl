@@ -17,6 +17,7 @@
 
 package android.view;
 
+import android.graphics.Point;
 import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
@@ -24,6 +25,8 @@ import android.view.DragEvent;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.DisplayCutout;
+import android.view.InsetsState;
+import android.view.InsetsSourceControl;
 
 import com.android.internal.os.IResultReceiver;
 import android.util.MergedConfiguration;
@@ -51,8 +54,25 @@ oneway interface IWindow {
     void resized(in Rect frame, in Rect overscanInsets, in Rect contentInsets,
             in Rect visibleInsets, in Rect stableInsets, in Rect outsets, boolean reportDraw,
             in MergedConfiguration newMergedConfiguration, in Rect backDropFrame,
-            boolean forceLayout, boolean alwaysConsumeNavBar, int displayId,
+            boolean forceLayout, boolean alwaysConsumeSystemBars, int displayId,
             in DisplayCutout.ParcelableWrapper displayCutout);
+
+    /**
+     * Called when the window location in parent display has changed. The offset will only be a
+     * nonzero value if the window is on an embedded display that is re-parented to another window.
+     */
+    void locationInParentDisplayChanged(in Point offset);
+
+    /**
+     * Called when the window insets configuration has changed.
+     */
+    void insetsChanged(in InsetsState insetsState);
+
+    /**
+     * Called when this window retrieved control over a specified set of inset sources.
+     */
+    void insetsControlChanged(in InsetsState insetsState, in InsetsSourceControl[] activeControls);
+
     void moved(int newX, int newY);
     void dispatchAppVisibility(boolean visible);
     void dispatchGetNewSurface();
@@ -62,14 +82,14 @@ oneway interface IWindow {
      * to date on the current state showing navigational focus (touch mode) too.
      */
     void windowFocusChanged(boolean hasFocus, boolean inTouchMode);
-    
+
     void closeSystemDialogs(String reason);
-    
+
     /**
      * Called for wallpaper windows when their offsets change.
      */
     void dispatchWallpaperOffsets(float x, float y, float xStep, float yStep, boolean sync);
-    
+
     void dispatchWallpaperCommand(String action, int x, int y,
             int z, in Bundle extras, boolean sync);
 

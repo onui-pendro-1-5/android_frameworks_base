@@ -77,11 +77,42 @@ public class RecentsAnimationControllerCompat {
         }
     }
 
-    public void finish(boolean toHome) {
+    /**
+     * Finish the current recents animation.
+     * @param toHome Going to home or back to the previous app.
+     * @param sendUserLeaveHint determines whether userLeaveHint will be set true to the previous
+     *                          app.
+     */
+    public void finish(boolean toHome, boolean sendUserLeaveHint) {
         try {
-            mAnimationController.finish(toHome);
+            mAnimationController.finish(toHome, sendUserLeaveHint);
         } catch (RemoteException e) {
             Log.e(TAG, "Failed to finish recents animation", e);
+        }
+    }
+
+    @Deprecated
+    public void setCancelWithDeferredScreenshot(boolean screenshot) {
+        try {
+            mAnimationController.setCancelWithDeferredScreenshot(screenshot);
+        } catch (RemoteException e) {
+            Log.e(TAG, "Failed to set cancel with deferred screenshot", e);
+        }
+    }
+
+    public void setDeferCancelUntilNextTransition(boolean defer, boolean screenshot) {
+        try {
+            mAnimationController.setDeferCancelUntilNextTransition(defer, screenshot);
+        } catch (RemoteException e) {
+            Log.e(TAG, "Failed to set deferred cancel with screenshot", e);
+        }
+    }
+
+    public void cleanupScreenshot() {
+        try {
+            mAnimationController.cleanupScreenshot();
+        } catch (RemoteException e) {
+            Log.e(TAG, "Failed to clean up screenshot of recents animation", e);
         }
     }
 }

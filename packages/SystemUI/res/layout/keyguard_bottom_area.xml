@@ -24,42 +24,7 @@
     android:outlineProvider="none"
     android:elevation="5dp" > <!-- Put it above the status bar header -->
 
-    <LinearLayout
-        android:id="@+id/keyguard_indication_area"
-        android:forceHasOverlappingRendering="false"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="@dimen/keyguard_indication_margin_bottom"
-        android:layout_gravity="bottom|center_horizontal"
-        android:orientation="vertical">
-
-        <include layout="@layout/ambient_indication"
-            android:id="@+id/ambient_indication_container" />
-
-        <com.android.systemui.statusbar.phone.KeyguardIndicationTextView
-            android:id="@+id/keyguard_indication_enterprise_disclosure"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_horizontal"
-            android:textStyle="italic"
-            android:textColor="?attr/wallpaperTextColorSecondary"
-            android:textSize="16sp"
-            android:textAppearance="?android:attr/textAppearanceSmall"
-            android:visibility="gone" />
-
-        <com.android.systemui.statusbar.phone.KeyguardIndicationTextView
-            android:id="@+id/keyguard_indication_text"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_horizontal"
-            android:fontFamily="@*android:string/config_headlineFontFamily"
-            android:textStyle="normal"
-            android:textColor="?attr/wallpaperTextColorSecondary"
-            android:textSize="16sp"
-            android:textAppearance="?android:attr/textAppearanceSmall"
-            android:accessibilityLiveRegion="polite" />
-
-    </LinearLayout>
+    <include layout="@layout/keyguard_indication_area_overlay" />
 
     <FrameLayout
         android:id="@+id/preview_container"
@@ -82,19 +47,10 @@
         android:layout_height="@dimen/keyguard_affordance_height"
         android:layout_width="@dimen/keyguard_affordance_width"
         android:layout_gravity="bottom|start"
-        android:src="@drawable/ic_phone_24dp"
+        android:src="@*android:drawable/ic_phone"
         android:scaleType="center"
         android:contentDescription="@string/accessibility_phone_button"
         android:tint="?attr/wallpaperTextColor" />
-
-    <com.android.systemui.statusbar.phone.LockIcon
-        android:id="@+id/lock_icon"
-        android:layout_width="@dimen/keyguard_affordance_width"
-        android:layout_height="@dimen/keyguard_affordance_height"
-        android:layout_gravity="bottom|center_horizontal"
-        android:src="@drawable/ic_lock_24dp"
-        android:contentDescription="@string/accessibility_unlock_button"
-        android:scaleType="center" />
 
     <FrameLayout
         android:id="@+id/overlay_container"

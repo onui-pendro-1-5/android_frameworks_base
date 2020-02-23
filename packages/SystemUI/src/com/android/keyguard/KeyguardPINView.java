@@ -24,6 +24,7 @@ import android.view.animation.AnimationUtils;
 
 import com.android.settingslib.animation.AppearAnimationUtils;
 import com.android.settingslib.animation.DisappearAnimationUtils;
+import com.android.systemui.R;
 
 /**
  * Displays a PIN pad for unlocking.
@@ -67,7 +68,9 @@ public class KeyguardPINView extends KeyguardPinBasedInputView {
     @Override
     protected void resetState() {
         super.resetState();
-        mSecurityMessageDisplay.setMessage("");
+        if (mSecurityMessageDisplay != null) {
+            mSecurityMessageDisplay.setMessage("");
+        }
     }
 
     @Override
@@ -102,7 +105,8 @@ public class KeyguardPINView extends KeyguardPinBasedInputView {
                         findViewById(R.id.key9)
                 },
                 new View[]{
-                        null, findViewById(R.id.key0), findViewById(R.id.key_enter)
+                        findViewById(R.id.delete_button), findViewById(R.id.key0),
+                        findViewById(R.id.key_enter)
                 },
                 new View[]{
                         null, mEcaView, null
@@ -112,6 +116,7 @@ public class KeyguardPINView extends KeyguardPinBasedInputView {
         if (cancelBtn != null) {
             cancelBtn.setOnClickListener(view -> {
                 mCallback.reset();
+                mCallback.onCancelClicked();
             });
         }
     }

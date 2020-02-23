@@ -42,6 +42,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.os.RemoteException;
+import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.provider.MediaStore;
@@ -59,6 +60,7 @@ import com.android.internal.os.BackgroundThread;
 import com.android.internal.util.DumpUtils;
 import com.android.internal.util.function.pooled.PooledLambda;
 
+import com.android.server.wm.ActivityTaskManagerInternal;
 import dalvik.system.DexFile;
 import dalvik.system.VMRuntime;
 
@@ -103,6 +105,7 @@ public final class PinnerService extends SystemService {
     public @interface AppKey {}
 
     private final Context mContext;
+    private final ActivityTaskManagerInternal mAtmInternal;
     private final ActivityManagerInternal mAmInternal;
     private final IActivityManager mAm;
     private final UserManager mUserManager;
@@ -164,6 +167,7 @@ public final class PinnerService extends SystemService {
         }
         mPinnerHandler = new PinnerHandler(BackgroundThread.get().getLooper());
 
+        mAtmInternal = LocalServices.getService(ActivityTaskManagerInternal.class);
         mAmInternal = LocalServices.getService(ActivityManagerInternal.class);
         mAm = ActivityManager.getService();
 
@@ -232,9 +236,17 @@ public final class PinnerService extends SystemService {
      * Handler for on start pinning message
      */
     private void handlePinOnStart() {
-         // Files to pin come from the overlay and can be specified per-device config
-        String[] filesToPin = mContext.getResources().getStringArray(
-                com.android.internal.R.array.config_defaultPinnerServiceFiles);
+        final String bootImage = SystemProperties.get("dalvik.vm.boot-image", "");
+        String[] filesToPin = null;
+        if (bootImage.endsWith("apex.art")) {
+            // Use the files listed for that specific boot image
+            filesToPin = mContext.getResources().getStringArray(
+                  com.android.internal.R.array.config_apexBootImagePinnerServiceFiles);
+        } else {
+            // Files to pin come from the overlay and can be specified per-device config
+            filesToPin = mContext.getResources().getStringArray(
+                  com.android.internal.R.array.config_defaultPinnerServiceFiles);
+        }
         // Continue trying to pin each file even if we fail to pin some of them
         for (String fileToPin : filesToPin) {
             PinnedFile pf = pinFile(fileToPin,
@@ -380,7 +392,7 @@ public final class PinnerService extends SystemService {
     }
 
     private ApplicationInfo getHomeInfo(int userHandle) {
-        Intent intent = mAmInternal.getHomeIntent();
+        Intent intent = mAtmInternal.getHomeIntent();
         return getApplicationInfoForIntent(intent, userHandle, false);
     }
 

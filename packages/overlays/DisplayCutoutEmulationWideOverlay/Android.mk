@@ -1,8 +1,10 @@
 LOCAL_PATH:= $(call my-dir)
 include $(CLEAR_VARS)
 
-LOCAL_PACKAGE_NAME := DisplayCutoutEmulationWide
-LOCAL_CERTIFICATE := platform
+LOCAL_RRO_THEME := DisplayCutoutEmulationWide
+
+
+LOCAL_PRODUCT_MODULE := true
 
 LOCAL_SRC_FILES := $(call all-subdir-java-files)
 

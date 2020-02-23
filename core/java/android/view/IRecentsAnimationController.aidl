@@ -33,6 +33,7 @@ interface IRecentsAnimationController {
      * Takes a screenshot of the task associated with the given {@param taskId}. Only valid for the
      * current set of task ids provided to the handler.
      */
+    @UnsupportedAppUsage
     ActivityManager.TaskSnapshot screenshotTask(int taskId);
 
     /**
@@ -40,8 +41,11 @@ interface IRecentsAnimationController {
      * with remote animation targets should be relinquished. If {@param moveHomeToTop} is true, then
      * the home activity should be moved to the top. Otherwise, the home activity is hidden and the
      * user is returned to the app.
+     * @param sendUserLeaveHint If set to true, {@link Activity#onUserLeaving} will be sent to the
+     *                          top resumed app, false otherwise.
      */
-    void finish(boolean moveHomeToTop);
+    @UnsupportedAppUsage
+    void finish(boolean moveHomeToTop, boolean sendUserLeaveHint);
 
     /**
      * Called by the handler to indicate that the recents animation input consumer should be
@@ -50,6 +54,7 @@ interface IRecentsAnimationController {
      * may register the recents animation input consumer prior to starting the recents animation
      * and then enable it mid-animation to start receiving touch events.
      */
+    @UnsupportedAppUsage
     void setInputConsumerEnabled(boolean enabled);
 
     /**
@@ -58,6 +63,7 @@ interface IRecentsAnimationController {
     * they can control the SystemUI flags, otherwise the SystemUI flags from home activity will be
     * taken.
     */
+    @UnsupportedAppUsage
     void setAnimationTargetsBehindSystemBars(boolean behindSystemBars);
 
     /**
@@ -69,4 +75,49 @@ interface IRecentsAnimationController {
      * Hides the current input method if one is showing.
      */
     void hideCurrentInputMethod();
+
+    /**
+     * This call is deprecated, use #setDeferCancelUntilNextTransition() instead
+     * TODO(138144750): Remove this method once there are no callers
+     * @deprecated
+     */
+    void setCancelWithDeferredScreenshot(boolean screenshot);
+
+    /**
+     * Clean up the screenshot of previous task which was created during recents animation that
+     * was cancelled by a stack order change.
+     *
+     * @see {@link IRecentsAnimationRunner#onAnimationCanceled}
+     */
+    void cleanupScreenshot();
+
+    /**
+     * Set a state for controller whether would like to cancel recents animations with deferred
+     * task screenshot presentation.
+     *
+     * When we cancel the recents animation due to a stack order change, we can't just cancel it
+     * immediately as it would lead to a flicker in Launcher if we just remove the task from the
+     * leash. Instead we screenshot the previous task and replace the child of the leash with the
+     * screenshot, so that Launcher can still control the leash lifecycle & make the next app
+     * transition animate smoothly without flickering.
+     *
+     * @param defer When set {@code true}, means that the recents animation will defer canceling the
+     *              animation when a stack order change is triggered until the subsequent app
+     *              transition start and skip previous task's animation.
+     *              When set to {@code false}, means that the recents animation will be canceled
+     *              immediately when the stack order changes.
+     * @param screenshot When set {@code true}, means that the system will take previous task's
+     *                   screenshot and replace the contents of the leash with it when the next app
+     *                   transition starting. The runner must call #cleanupScreenshot() to end the
+     *                   recents animation.
+     *                   When set to {@code false}, means that the system will simply wait for the
+     *                   next app transition start to immediately cancel the recents animation. This
+     *                   can be useful when you want an immediate transition into a state where the
+     *                   task is shown in the home/recents activity (without waiting for a
+     *                   screenshot).
+     *
+     * @see #cleanupScreenshot()
+     * @see IRecentsAnimationRunner#onCancelled
+     */
+    void setDeferCancelUntilNextTransition(boolean defer, boolean screenshot);
 }

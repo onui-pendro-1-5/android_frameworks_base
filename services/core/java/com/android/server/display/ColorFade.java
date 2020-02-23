@@ -16,16 +16,7 @@
 
 package com.android.server.display;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.FloatBuffer;
-
 import android.content.Context;
-import android.graphics.PixelFormat;
 import android.graphics.SurfaceTexture;
 import android.hardware.display.DisplayManagerInternal;
 import android.hardware.display.DisplayManagerInternal.DisplayTransactionListener;
@@ -34,20 +25,30 @@ import android.opengl.EGLConfig;
 import android.opengl.EGLContext;
 import android.opengl.EGLDisplay;
 import android.opengl.EGLSurface;
-import android.opengl.GLES20;
 import android.opengl.GLES11Ext;
-import android.os.SystemProperties;
+import android.opengl.GLES20;
+import android.os.IBinder;
 import android.util.Slog;
+import android.view.Display;
 import android.view.DisplayInfo;
-import android.view.Surface.OutOfResourcesException;
 import android.view.Surface;
+import android.view.Surface.OutOfResourcesException;
 import android.view.SurfaceControl;
+import android.view.SurfaceControl.Transaction;
 import android.view.SurfaceSession;
-
-import libcore.io.Streams;
 
 import com.android.server.LocalServices;
 import com.android.server.policy.WindowManagerPolicy;
+
+import libcore.io.Streams;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
 
 /**
  * <p>
@@ -72,8 +73,8 @@ final class ColorFade {
     // See code for details.
     private static final int DEJANK_FRAMES = 3;
 
-    private static final boolean DESTROY_SURFACE_AFTER_DETACH =
-            SystemProperties.getBoolean("ro.egl.destroy_after_detach", false);
+    private static final int EGL_GL_COLORSPACE_KHR = 0x309D;
+    private static final int EGL_GL_COLORSPACE_DISPLAY_P3_PASSTHROUGH_EXT = 0x3490;
 
     private final int mDisplayId;
 
@@ -96,6 +97,7 @@ final class ColorFade {
     private EGLSurface mEglSurface;
     private boolean mSurfaceVisible;
     private float mSurfaceAlpha;
+    private boolean mIsWideColor;
 
     // Texture names.  We only use one texture, which contains the screenshot.
     private final int[] mTexNames = new int[1];
@@ -483,8 +485,16 @@ final class ColorFade {
             final SurfaceTexture st = new SurfaceTexture(mTexNames[0]);
             final Surface s = new Surface(st);
             try {
-                SurfaceControl.screenshot(SurfaceControl.getBuiltInDisplay(
-                        SurfaceControl.BUILT_IN_DISPLAY_ID_MAIN), s);
+                final IBinder token = SurfaceControl.getInternalDisplayToken();
+                if (token == null) {
+                    Slog.e(TAG,
+                            "Failed to take screenshot because internal display is disconnected");
+                    return false;
+                }
+
+                mIsWideColor = SurfaceControl.getActiveColorMode(token)
+                        == Display.COLOR_MODE_DISPLAY_P3;
+                SurfaceControl.screenshot(token, s);
                 st.updateTexImage();
                 st.getTransformMatrix(mTexMatrix);
             } finally {
@@ -578,37 +588,31 @@ final class ColorFade {
             mSurfaceSession = new SurfaceSession();
         }
 
-        SurfaceControl.openTransaction();
-        try {
-            if (mSurfaceControl == null) {
-                try {
-                    int flags;
-                    if (mMode == MODE_FADE) {
-                        flags = SurfaceControl.FX_SURFACE_DIM | SurfaceControl.HIDDEN;
-                    } else {
-                        flags = SurfaceControl.OPAQUE | SurfaceControl.HIDDEN;
-                    }
-                    mSurfaceControl = new SurfaceControl.Builder(mSurfaceSession)
-                            .setName("ColorFade")
-                            .setSize(mDisplayWidth, mDisplayHeight)
-                            .setFlags(flags)
-                            .build();
-                } catch (OutOfResourcesException ex) {
-                    Slog.e(TAG, "Unable to create surface.", ex);
-                    return false;
+        if (mSurfaceControl == null) {
+            Transaction t = new Transaction();
+            try {
+                final SurfaceControl.Builder builder =
+                        new SurfaceControl.Builder(mSurfaceSession).setName("ColorFade");
+                if (mMode == MODE_FADE) {
+                    builder.setColorLayer();
+                } else {
+                    builder.setBufferSize(mDisplayWidth, mDisplayHeight);
                 }
-
-                mSurfaceControl.setLayerStack(mDisplayLayerStack);
-                mSurfaceControl.setSize(mDisplayWidth, mDisplayHeight);
-                mSurface = new Surface();
-                mSurface.copyFrom(mSurfaceControl);
-
-                mSurfaceLayout = new NaturalSurfaceLayout(mDisplayManagerInternal,
-                        mDisplayId, mSurfaceControl);
-                mSurfaceLayout.onDisplayTransaction();
+                mSurfaceControl = builder.build();
+            } catch (OutOfResourcesException ex) {
+                Slog.e(TAG, "Unable to create surface.", ex);
+                return false;
             }
-        } finally {
-            SurfaceControl.closeTransaction();
+
+            t.setLayerStack(mSurfaceControl, mDisplayLayerStack);
+            t.setWindowCrop(mSurfaceControl, mDisplayWidth, mDisplayHeight);
+            mSurface = new Surface();
+            mSurface.copyFrom(mSurfaceControl);
+
+            mSurfaceLayout = new NaturalSurfaceLayout(mDisplayManagerInternal,
+                    mDisplayId, mSurfaceControl);
+            mSurfaceLayout.onDisplayTransaction(t);
+            t.apply();
         }
         return true;
     }
@@ -616,8 +620,16 @@ final class ColorFade {
     private boolean createEglSurface() {
         if (mEglSurface == null) {
             int[] eglSurfaceAttribList = new int[] {
+                    EGL14.EGL_NONE,
+                    EGL14.EGL_NONE,
                     EGL14.EGL_NONE
             };
+
+            // If the current display is in wide color, then so is the screenshot.
+            if (mIsWideColor) {
+                eglSurfaceAttribList[0] = EGL_GL_COLORSPACE_KHR;
+                eglSurfaceAttribList[1] = EGL_GL_COLORSPACE_DISPLAY_P3_PASSTHROUGH_EXT;
+            }
             // turn our SurfaceControl into a Surface
             mEglSurface = EGL14.eglCreateWindowSurface(mEglDisplay, mEglConfig, mSurface,
                     eglSurfaceAttribList, 0);
@@ -642,13 +654,8 @@ final class ColorFade {
         if (mSurfaceControl != null) {
             mSurfaceLayout.dispose();
             mSurfaceLayout = null;
-            SurfaceControl.openTransaction();
-            try {
-                mSurfaceControl.destroy();
-                mSurface.release();
-            } finally {
-                SurfaceControl.closeTransaction();
-            }
+            new Transaction().remove(mSurfaceControl).apply();
+            mSurface.release();
             mSurfaceControl = null;
             mSurfaceVisible = false;
             mSurfaceAlpha = 0f;
@@ -755,7 +762,7 @@ final class ColorFade {
         }
 
         @Override
-        public void onDisplayTransaction() {
+        public void onDisplayTransaction(Transaction t) {
             synchronized (this) {
                 if (mSurfaceControl == null) {
                     return;
@@ -764,21 +771,21 @@ final class ColorFade {
                 DisplayInfo displayInfo = mDisplayManagerInternal.getDisplayInfo(mDisplayId);
                 switch (displayInfo.rotation) {
                     case Surface.ROTATION_0:
-                        mSurfaceControl.setPosition(0, 0);
-                        mSurfaceControl.setMatrix(1, 0, 0, 1);
+                        t.setPosition(mSurfaceControl, 0, 0);
+                        t.setMatrix(mSurfaceControl, 1, 0, 0, 1);
                         break;
                     case Surface.ROTATION_90:
-                        mSurfaceControl.setPosition(0, displayInfo.logicalHeight);
-                        mSurfaceControl.setMatrix(0, -1, 1, 0);
+                        t.setPosition(mSurfaceControl, 0, displayInfo.logicalHeight);
+                        t.setMatrix(mSurfaceControl, 0, -1, 1, 0);
                         break;
                     case Surface.ROTATION_180:
-                        mSurfaceControl.setPosition(displayInfo.logicalWidth,
+                        t.setPosition(mSurfaceControl, displayInfo.logicalWidth,
                                 displayInfo.logicalHeight);
-                        mSurfaceControl.setMatrix(-1, 0, 0, -1);
+                        t.setMatrix(mSurfaceControl, -1, 0, 0, -1);
                         break;
                     case Surface.ROTATION_270:
-                        mSurfaceControl.setPosition(displayInfo.logicalWidth, 0);
-                        mSurfaceControl.setMatrix(0, 1, -1, 0);
+                        t.setPosition(mSurfaceControl, displayInfo.logicalWidth, 0);
+                        t.setMatrix(mSurfaceControl, 0, 1, -1, 0);
                         break;
                 }
             }

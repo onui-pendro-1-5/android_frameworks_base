@@ -15,15 +15,17 @@
  */
 package com.android.systemui.statusbar.policy;
 
+import static com.android.systemui.statusbar.policy.NetworkControllerImpl.TAG;
+
+import android.annotation.NonNull;
 import android.content.Context;
 import android.text.format.DateFormat;
 import android.util.Log;
+
 import com.android.systemui.statusbar.policy.NetworkController.SignalCallback;
 
 import java.io.PrintWriter;
 import java.util.BitSet;
-
-import static com.android.systemui.statusbar.policy.NetworkControllerImpl.TAG;
 
 
 /**
@@ -165,8 +167,8 @@ public abstract class SignalController<T extends SignalController.State,
     /**
      * Returns the resource if resId is not 0, and an empty string otherwise.
      */
-    protected String getStringIfExists(int resId) {
-        return resId != 0 ? mContext.getString(resId) : "";
+    @NonNull CharSequence getStringIfExists(int resId) {
+        return resId != 0 ? mContext.getText(resId) : "";
     }
 
     protected I getIcons() {
@@ -257,6 +259,7 @@ public abstract class SignalController<T extends SignalController.State,
         boolean enabled;
         boolean activityIn;
         boolean activityOut;
+        public boolean activityDormant;
         int level;
         IconGroup iconGroup;
         int inetCondition;
@@ -273,6 +276,7 @@ public abstract class SignalController<T extends SignalController.State,
             inetCondition = state.inetCondition;
             activityIn = state.activityIn;
             activityOut = state.activityOut;
+            activityDormant = state.activityDormant;
             rssi = state.rssi;
             time = state.time;
         }
@@ -296,6 +300,7 @@ public abstract class SignalController<T extends SignalController.State,
                     .append("iconGroup=").append(iconGroup).append(',')
                     .append("activityIn=").append(activityIn).append(',')
                     .append("activityOut=").append(activityOut).append(',')
+                    .append("activityDormant=").append(activityDormant).append(',')
                     .append("rssi=").append(rssi).append(',')
                     .append("lastModified=").append(DateFormat.format("MM-dd HH:mm:ss", time));
         }
@@ -313,6 +318,7 @@ public abstract class SignalController<T extends SignalController.State,
                     && other.iconGroup == iconGroup
                     && other.activityIn == activityIn
                     && other.activityOut == activityOut
+                    && other.activityDormant == activityDormant
                     && other.rssi == rssi;
         }
     }

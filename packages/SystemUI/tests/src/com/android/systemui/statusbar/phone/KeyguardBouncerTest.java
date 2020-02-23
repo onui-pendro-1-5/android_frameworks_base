@@ -18,9 +18,12 @@ package com.android.systemui.statusbar.phone;
 
 import static com.google.common.truth.Truth.assertThat;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
@@ -28,33 +31,39 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.verifyZeroInteractions;
 import static org.mockito.Mockito.when;
 
+import android.content.res.ColorStateList;
 import android.graphics.Color;
-import android.support.test.filters.SmallTest;
+import android.os.Handler;
 import android.testing.AndroidTestingRunner;
 import android.testing.TestableLooper;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.widget.FrameLayout;
 
+import androidx.test.filters.SmallTest;
+
 import com.android.internal.widget.LockPatternUtils;
 import com.android.keyguard.KeyguardHostView;
 import com.android.keyguard.KeyguardSecurityModel;
+import com.android.keyguard.KeyguardUpdateMonitor;
 import com.android.keyguard.ViewMediatorCallback;
 import com.android.systemui.DejankUtils;
 import com.android.systemui.SysuiTestCase;
-import com.android.systemui.classifier.FalsingManager;
 import com.android.systemui.keyguard.DismissCallbackRegistry;
+import com.android.systemui.plugins.ActivityStarter.OnDismissAction;
+import com.android.systemui.plugins.FalsingManager;
 
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 @SmallTest
 @RunWith(AndroidTestingRunner.class)
-@TestableLooper.RunWithLooper(setAsMainLooper = true)
+@TestableLooper.RunWithLooper
 public class KeyguardBouncerTest extends SysuiTestCase {
 
     @Mock
@@ -71,11 +80,20 @@ public class KeyguardBouncerTest extends SysuiTestCase {
     private ViewTreeObserver mViewTreeObserver;
     @Mock
     private KeyguardBouncer.BouncerExpansionCallback mExpansionCallback;
+    @Mock
+    private KeyguardUpdateMonitor mKeyguardUpdateMonitor;
+    @Mock
+    private UnlockMethodCache mUnlockMethodCache;
+    @Mock
+    private KeyguardBypassController mKeyguardBypassController;
+    @Mock
+    private Handler mHandler;
 
     private KeyguardBouncer mBouncer;
 
     @Before
     public void setup() {
+        com.android.systemui.util.Assert.sMainLooper = TestableLooper.get(this).getLooper();
         MockitoAnnotations.initMocks(this);
         DejankUtils.setImmediate(true);
         final ViewGroup container = new FrameLayout(getContext());
@@ -83,7 +101,8 @@ public class KeyguardBouncerTest extends SysuiTestCase {
         when(mKeyguardHostView.getHeight()).thenReturn(500);
         mBouncer = new KeyguardBouncer(getContext(), mViewMediatorCallback,
                 mLockPatternUtils, container, mDismissCallbackRegistry, mFalsingManager,
-                mExpansionCallback) {
+                mExpansionCallback, mUnlockMethodCache, mKeyguardUpdateMonitor,
+                mKeyguardBypassController, mHandler) {
             @Override
             protected void inflateView() {
                 super.inflateView();
@@ -127,6 +146,7 @@ public class KeyguardBouncerTest extends SysuiTestCase {
     public void testShow_notifiesVisibility() {
         mBouncer.show(true);
         verify(mViewMediatorCallback).onBouncerVisiblityChanged(eq(true));
+        verify(mExpansionCallback).onStartingToShow();
 
         // Not called again when visible
         reset(mViewMediatorCallback);
@@ -169,13 +189,17 @@ public class KeyguardBouncerTest extends SysuiTestCase {
         mBouncer.ensureView();
         mBouncer.setExpansion(0.5f);
 
-        mBouncer.setExpansion(1);
+        mBouncer.setExpansion(KeyguardBouncer.EXPANSION_HIDDEN);
         verify(mFalsingManager).onBouncerHidden();
         verify(mExpansionCallback).onFullyHidden();
 
-        mBouncer.setExpansion(0);
+        mBouncer.setExpansion(KeyguardBouncer.EXPANSION_VISIBLE);
         verify(mFalsingManager).onBouncerShown();
         verify(mExpansionCallback).onFullyShown();
+
+        verify(mExpansionCallback, never()).onStartingToHide();
+        mBouncer.setExpansion(0.9f);
+        verify(mExpansionCallback).onStartingToHide();
     }
 
     @Test
@@ -227,13 +251,13 @@ public class KeyguardBouncerTest extends SysuiTestCase {
     public void testShowMessage_propagates() {
         final String message = "a message";
         mBouncer.ensureView();
-        mBouncer.showMessage(message, Color.GREEN);
-        verify(mKeyguardHostView).showMessage(eq(message), eq(Color.GREEN));
+        mBouncer.showMessage(message, ColorStateList.valueOf(Color.GREEN));
+        verify(mKeyguardHostView).showMessage(eq(message), eq(ColorStateList.valueOf(Color.GREEN)));
     }
 
     @Test
     public void testShowOnDismissAction_showsBouncer() {
-        final KeyguardHostView.OnDismissAction dismissAction = () -> false;
+        final OnDismissAction dismissAction = () -> false;
         final Runnable cancelAction = () -> {};
         mBouncer.showWithDismissAction(dismissAction, cancelAction);
         verify(mKeyguardHostView).setOnDismissAction(dismissAction, cancelAction);
@@ -328,11 +352,25 @@ public class KeyguardBouncerTest extends SysuiTestCase {
     }
 
     @Test
-    public void testIsShowingScrimmed() {
+    public void testIsShowingScrimmed_true() {
+        doAnswer(invocation -> {
+            assertThat(mBouncer.isScrimmed()).isTrue();
+            return null;
+        }).when(mExpansionCallback).onFullyShown();
         mBouncer.show(false /* resetSecuritySelection */, true /* animate */);
-        assertThat(mBouncer.isShowingScrimmed()).isTrue();
+        assertThat(mBouncer.isScrimmed()).isTrue();
+        mBouncer.hide(false /* destroyView */);
+        assertThat(mBouncer.isScrimmed()).isFalse();
+    }
+
+    @Test
+    public void testIsShowingScrimmed_false() {
+        doAnswer(invocation -> {
+            assertThat(mBouncer.isScrimmed()).isFalse();
+            return null;
+        }).when(mExpansionCallback).onFullyShown();
         mBouncer.show(false /* resetSecuritySelection */, false /* animate */);
-        assertThat(mBouncer.isShowingScrimmed()).isFalse();
+        assertThat(mBouncer.isScrimmed()).isFalse();
     }
 
     @Test
@@ -341,5 +379,43 @@ public class KeyguardBouncerTest extends SysuiTestCase {
         Assert.assertFalse("Action not set yet", mBouncer.willDismissWithAction());
         when(mKeyguardHostView.hasDismissActions()).thenReturn(true);
         Assert.assertTrue("Action should exist", mBouncer.willDismissWithAction());
+    }
+
+    @Test
+    public void testShow_delaysIfFaceAuthIsRunning() {
+        when(mUnlockMethodCache.isFaceAuthEnabled()).thenReturn(true);
+        mBouncer.show(true /* reset */);
+
+        ArgumentCaptor<Runnable> showRunnable = ArgumentCaptor.forClass(Runnable.class);
+        verify(mHandler).postDelayed(showRunnable.capture(),
+                eq(KeyguardBouncer.BOUNCER_FACE_DELAY));
+
+        mBouncer.hide(false /* destroyView */);
+        verify(mHandler).removeCallbacks(eq(showRunnable.getValue()));
+    }
+
+    @Test
+    public void testShow_delaysIfFaceAuthIsRunning_unlessBypass() {
+        when(mUnlockMethodCache.isFaceAuthEnabled()).thenReturn(true);
+        when(mKeyguardBypassController.getBypassEnabled()).thenReturn(true);
+        mBouncer.show(true /* reset */);
+
+        verify(mHandler, never()).postDelayed(any(), anyLong());
+    }
+
+    @Test
+    public void testRegisterUpdateMonitorCallback() {
+        verify(mKeyguardUpdateMonitor).registerCallback(any());
+    }
+
+    @Test
+    public void testInTransit_whenTranslation() {
+        mBouncer.show(true);
+        mBouncer.setExpansion(KeyguardBouncer.EXPANSION_HIDDEN);
+        assertThat(mBouncer.inTransit()).isFalse();
+        mBouncer.setExpansion(0.5f);
+        assertThat(mBouncer.inTransit()).isTrue();
+        mBouncer.setExpansion(KeyguardBouncer.EXPANSION_VISIBLE);
+        assertThat(mBouncer.inTransit()).isFalse();
     }
 }

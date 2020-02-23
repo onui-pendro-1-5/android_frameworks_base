@@ -18,7 +18,7 @@
 #include "utils/Log.h"
 #include "utils/String8.h"
 
-#include "android_media_Utils.h"
+#include "android_media_Streams.h"
 #include "mtp.h"
 #include "IMtpDatabase.h"
 #include "MtpDataPacket.h"
@@ -1278,6 +1278,7 @@ MtpProperty* MtpDatabase::getDevicePropertyDesc(MtpDeviceProperty property) {
             case MTP_DEVICE_PROPERTY_DEVICE_FRIENDLY_NAME:
                 writable = true;
                 // fall through
+                FALLTHROUGH_INTENDED;
             case MTP_DEVICE_PROPERTY_IMAGE_SIZE:
             {
                 result = new MtpProperty(property, MTP_TYPE_STR, writable);

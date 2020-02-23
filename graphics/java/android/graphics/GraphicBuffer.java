@@ -16,6 +16,7 @@
 
 package android.graphics;
 
+import android.annotation.UnsupportedAppUsage;
 import android.os.Parcel;
 import android.os.Parcelable;
 
@@ -54,6 +55,7 @@ public class GraphicBuffer implements Parcelable {
     private final int mUsage;
     private final boolean mCapturedSecureLayers;
     // Note: do not rename, this field is used by native code
+    @UnsupportedAppUsage
     private final long mNativeObject;
 
     // These two fields are only used by lock/unlockCanvas()
@@ -85,8 +87,8 @@ public class GraphicBuffer implements Parcelable {
     /**
      * Private use only. See {@link #create(int, int, int, int, boolean)}.
      */
-    private GraphicBuffer(int width, int height, int format, int usage, long nativeObject,
-                          boolean capturedSecureLayers) {
+    @UnsupportedAppUsage
+    private GraphicBuffer(int width, int height, int format, int usage, long nativeObject) {
         mWidth = width;
         mHeight = height;
         mFormat = format;
@@ -106,6 +108,7 @@ public class GraphicBuffer implements Parcelable {
      * For SurfaceControl JNI.
      * @hide
      */
+    @UnsupportedAppUsage
     public static GraphicBuffer createFromExisting(int width, int height,
             int format, int usage, long unwrappedNativeObject,
             boolean capturedSecureLayers) {
@@ -303,7 +306,8 @@ public class GraphicBuffer implements Parcelable {
         nWriteGraphicBufferToParcel(mNativeObject, dest);
     }
 
-    public static final Parcelable.Creator<GraphicBuffer> CREATOR =
+    @UnsupportedAppUsage
+    public static final @android.annotation.NonNull Parcelable.Creator<GraphicBuffer> CREATOR =
             new Parcelable.Creator<GraphicBuffer>() {
         public GraphicBuffer createFromParcel(Parcel in) {
             int width = in.readInt();

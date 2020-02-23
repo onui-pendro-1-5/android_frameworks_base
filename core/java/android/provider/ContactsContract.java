@@ -20,6 +20,8 @@ import android.accounts.Account;
 import android.annotation.SdkConstant;
 import android.annotation.SdkConstant.SdkConstantType;
 import android.annotation.SystemApi;
+import android.annotation.TestApi;
+import android.annotation.UnsupportedAppUsage;
 import android.app.Activity;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -124,6 +126,7 @@ public final class ContactsContract {
      * Prefix for column names that are not visible to client apps.
      * @hide
      */
+    @TestApi
     public static final String HIDDEN_COLUMN_PREFIX = "x_";
 
     /**
@@ -186,8 +189,7 @@ public final class ContactsContract {
     /**
      * A boolean parameter for {@link Contacts#CONTENT_STREQUENT_URI} and
      * {@link Contacts#CONTENT_STREQUENT_FILTER_URI}, which requires the ContactsProvider to
-     * return only phone-related results. For example, frequently contacted person list should
-     * include persons contacted via phone (not email, sms, etc.)
+     * return only phone-related results.
      */
     public static final String STREQUENT_PHONE_ONLY = "strequent_phone_only";
 
@@ -868,22 +870,32 @@ public final class ContactsContract {
     protected interface ContactOptionsColumns {
         /**
          * The number of times a contact has been contacted.
-         * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field is obsolete. For
-         * more information, see the
+         * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store,
+         * this field is obsolete, regardless of Android version. For more information, see the
          * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
          * page.</p>
          * <P>Type: INTEGER</P>
+         *
+         * @deprecated Contacts affinity information is no longer supported as of
+         * Android version {@link android.os.Build.VERSION_CODES#Q}. This column
+         * always contains 0.
          */
+        @Deprecated
         public static final String TIMES_CONTACTED = "times_contacted";
 
         /**
          * The last time a contact was contacted.
-         * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field is obsolete. For
-         * more information, see the
+         * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store,
+         * this field is obsolete, regardless of Android version. For more information, see the
          * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
          * page.</p>
          * <P>Type: INTEGER</P>
+         *
+         * @deprecated Contacts affinity information is no longer supported as of
+         * Android version {@link android.os.Build.VERSION_CODES#Q}. This column
+         * always contains 0.
          */
+        @Deprecated
         public static final String LAST_TIME_CONTACTED = "last_time_contacted";
 
         /** @hide Raw value. */
@@ -1320,8 +1332,7 @@ public final class ContactsContract {
      * of the newly inserted raw contact.</dd>
      * <dt><b>Update</b></dt>
      * <dd>Only certain columns of Contact are modifiable:
-     * {@link #TIMES_CONTACTED}, {@link #LAST_TIME_CONTACTED}, {@link #STARRED},
-     * {@link #CUSTOM_RINGTONE}, {@link #SEND_TO_VOICEMAIL}. Changing any of
+     * {@link #STARRED}, {@link #CUSTOM_RINGTONE}, {@link #SEND_TO_VOICEMAIL}. Changing any of
      * these columns on the Contact also changes them on all constituent raw
      * contacts.</dd>
      * <dt><b>Delete</b></dt>
@@ -1422,27 +1433,6 @@ public final class ContactsContract {
      * </tr>
      * <tr>
      * <td>int</td>
-     * <td>{@link #TIMES_CONTACTED}</td>
-     * <td>read/write</td>
-     * <td>The number of times the contact has been contacted. See
-     * {@link #markAsContacted}. When raw contacts are aggregated, this field is
-     * computed automatically as the maximum number of times contacted among all
-     * constituent raw contacts. Setting this field automatically changes the
-     * corresponding field on all constituent raw contacts.</td>
-     * </tr>
-     * <tr>
-     * <td>long</td>
-     * <td>{@link #LAST_TIME_CONTACTED}</td>
-     * <td>read/write</td>
-     * <td>The timestamp of the last time the contact was contacted. See
-     * {@link #markAsContacted}. Setting this field also automatically
-     * increments {@link #TIMES_CONTACTED}. When raw contacts are aggregated,
-     * this field is computed automatically as the latest time contacted of all
-     * constituent raw contacts. Setting this field automatically changes the
-     * corresponding field on all constituent raw contacts.</td>
-     * </tr>
-     * <tr>
-     * <td>int</td>
      * <td>{@link #STARRED}</td>
      * <td>read/write</td>
      * <td>An indicator for favorite contacts: '1' if favorite, '0' otherwise.
@@ -1539,6 +1529,7 @@ public final class ContactsContract {
          *
          * @hide
          */
+        @UnsupportedAppUsage
         public static final Uri CORP_CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI,
                 "contacts_corp");
 
@@ -1703,24 +1694,20 @@ public final class ContactsContract {
          * TIMES_CONTACTED field is incremented by 1 and the LAST_TIME_CONTACTED
          * field is populated with the current system time.
          *
-         * <p class="caution"><b>Caution: </b>As of January 7, 2019, this method is obsolete. For
-         * more information, see the
+         * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store,
+         * this field is obsolete, regardless of Android version. For more information, see the
          * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
-         * page.
+         * page.</p>
          *
          * @param resolver the ContentResolver to use
          * @param contactId the person who was contacted
          *
-         * @deprecated The class DataUsageStatUpdater of the Android support library should
-         *     be used instead.
+         * @deprecated Contacts affinity information is no longer supported as of
+         * Android version {@link android.os.Build.VERSION_CODES#Q}. This method
+         * is no-op.
          */
         @Deprecated
         public static void markAsContacted(ContentResolver resolver, long contactId) {
-            Uri uri = ContentUris.withAppendedId(CONTENT_URI, contactId);
-            ContentValues values = new ContentValues();
-            // TIMES_CONTACTED will be incremented when LAST_TIME_CONTACTED is modified.
-            values.put(LR_LAST_TIME_CONTACTED, System.currentTimeMillis());
-            resolver.update(uri, values, null, null);
         }
 
         /**
@@ -1742,11 +1729,12 @@ public final class ContactsContract {
 
         /**
          * The content:// style URI for this table joined with useful data from
-         * {@link ContactsContract.Data}, filtered to include only starred contacts
-         * and the most frequently contacted contacts.
+         * {@link ContactsContract.Data}, filtered to include only starred contacts.
+         * Frequent contacts are no longer included in the result as of
+         * Android version {@link android.os.Build.VERSION_CODES#Q}.
          *
-         * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field no longer sorts
-         * results based on contacts frequency. For more information, see the
+         * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store, this
+         * field doesn't sort results based on contacts frequency. For more information, see the
          * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
          * page.
          */
@@ -1756,22 +1744,27 @@ public final class ContactsContract {
         /**
          * The content:// style URI for showing a list of frequently contacted people.
          *
-         * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field no longer sorts
-         * results based on contacts frequency. For more information, see the
+         * @deprecated Frequent contacts are no longer supported as of
+         * Android version {@link android.os.Build.VERSION_CODES#Q}.
+         * This URI always returns an empty cursor.
+         *
+         * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store, this
+         * field doesn't sort results based on contacts frequency. For more information, see the
          * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
          * page.
          */
+        @Deprecated
         public static final Uri CONTENT_FREQUENT_URI = Uri.withAppendedPath(
                 CONTENT_URI, "frequent");
 
         /**
-         * The content:// style URI used for "type-to-filter" functionality on the
+         * <p>The content:// style URI used for "type-to-filter" functionality on the
          * {@link #CONTENT_STREQUENT_URI} URI. The filter string will be used to match
          * various parts of the contact name. The filter argument should be passed
          * as an additional path segment after this URI.
          *
-         * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field no longer sorts
-         * results based on contacts frequency. For more information, see the
+         * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store, this
+         * field doesn't sort results based on contacts frequency. For more information, see the
          * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
          * page.
          */
@@ -2054,6 +2047,7 @@ public final class ContactsContract {
             /**
              * @hide
              */
+            @UnsupportedAppUsage
             public static final Builder builder() {
                 return new Builder();
             }
@@ -2660,27 +2654,6 @@ public final class ContactsContract {
      * then calls ContactResolver.delete once more, this time passing the
      * {@link ContactsContract#CALLER_IS_SYNCADAPTER} query parameter to finalize
      * the data removal.</td>
-     * </tr>
-     * <tr>
-     * <td>int</td>
-     * <td>{@link #TIMES_CONTACTED}</td>
-     * <td>read/write</td>
-     * <td>The number of times the contact has been contacted. To have an effect
-     * on the corresponding value of the aggregate contact, this field
-     * should be set at the time the raw contact is inserted.
-     * After that, this value is typically updated via
-     * {@link ContactsContract.Contacts#markAsContacted}.</td>
-     * </tr>
-     * <tr>
-     * <td>long</td>
-     * <td>{@link #LAST_TIME_CONTACTED}</td>
-     * <td>read/write</td>
-     * <td>The timestamp of the last time the contact was contacted. To have an effect
-     * on the corresponding value of the aggregate contact, this field
-     * should be set at the time the raw contact is inserted.
-     * After that, this value is typically updated via
-     * {@link ContactsContract.Contacts#markAsContacted}.
-     * </td>
      * </tr>
      * <tr>
      * <td>int</td>
@@ -4321,25 +4294,30 @@ public final class ContactsContract {
     protected interface DataUsageStatColumns {
         /**
          * The last time (in milliseconds) this {@link Data} was used.
+         * @deprecated Contacts affinity information is no longer supported as of
+         * Android version {@link android.os.Build.VERSION_CODES#Q}.
+         * This column always contains 0.
          *
-         * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field is obsolete. For
-         * more information, see the
+         * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store,
+         * this field is obsolete, regardless of Android version. For more information, see the
          * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
-         * page.
-         *
+         * page.</p>
          */
+        @Deprecated
         public static final String LAST_TIME_USED = "last_time_used";
 
         /**
          * The number of times the referenced {@link Data} has been used.
+         * @deprecated Contacts affinity information is no longer supported as of
+         * Android version {@link android.os.Build.VERSION_CODES#Q}.
+         * This column always contains 0.
          *
-         * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field is obsolete. For
-         * more information, see the
+         * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store,
+         * this field is obsolete, regardless of Android version. For more information, see the
          * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
-         * page.
-         *
-         *
+         * page.</p>
          */
+        @Deprecated
         public static final String TIMES_USED = "times_used";
 
         /** @hide Raw value. */
@@ -4815,18 +4793,6 @@ public final class ContactsContract {
      * </tr>
      * <tr>
      * <td>int</td>
-     * <td>{@link #TIMES_CONTACTED}</td>
-     * <td>read-only</td>
-     * <td>See {@link ContactsContract.Contacts}.</td>
-     * </tr>
-     * <tr>
-     * <td>long</td>
-     * <td>{@link #LAST_TIME_CONTACTED}</td>
-     * <td>read-only</td>
-     * <td>See {@link ContactsContract.Contacts}.</td>
-     * </tr>
-     * <tr>
-     * <td>int</td>
      * <td>{@link #STARRED}</td>
      * <td>read-only</td>
      * <td>See {@link ContactsContract.Contacts}.</td>
@@ -5102,6 +5068,7 @@ public final class ContactsContract {
         *
         * @hide
         */
+        @TestApi
         public static final Uri CORP_CONTENT_URI =
                 Uri.withAppendedPath(AUTHORITY_URI, "raw_contact_entities_corp");
 
@@ -5271,18 +5238,6 @@ public final class ContactsContract {
      * </tr>
      * <tr>
      * <td>int</td>
-     * <td>{@link #TIMES_CONTACTED}</td>
-     * <td>read-only</td>
-     * <td>See {@link ContactsContract.Contacts}.</td>
-     * </tr>
-     * <tr>
-     * <td>long</td>
-     * <td>{@link #LAST_TIME_CONTACTED}</td>
-     * <td>read-only</td>
-     * <td>See {@link ContactsContract.Contacts}.</td>
-     * </tr>
-     * <tr>
-     * <td>int</td>
      * <td>{@link #STARRED}</td>
      * <td>read-only</td>
      * <td>See {@link ContactsContract.Contacts}.</td>
@@ -5311,8 +5266,8 @@ public final class ContactsContract {
         /**
          * The content:// style URI for this table.
          *
-         * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field no longer
-         * sorts results based on contacts frequency. For more information, see the
+         * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store, this
+         * field doesn't sort results based on contacts frequency. For more information, see the
          * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
          * page.
          *
@@ -5329,8 +5284,8 @@ public final class ContactsContract {
         /**
          * <p>URI used for the "enterprise caller-id".</p>
          *
-         * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field no longer
-         * sorts results based on contacts frequency. For more information, see the
+         * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store, this
+         * field doesn't sort results based on contacts frequency. For more information, see the
          * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
          * page.
          *
@@ -6121,17 +6076,18 @@ public final class ContactsContract {
             *
             * @hide
             */
+            @TestApi
             public static final Uri ENTERPRISE_CONTENT_URI =
                     Uri.withAppendedPath(Data.ENTERPRISE_CONTENT_URI, "phones");
 
             /**
-             * The content:// style URL for phone lookup using a filter. The filter returns
+             * <p>The content:// style URL for phone lookup using a filter. The filter returns
              * records of MIME type {@link #CONTENT_ITEM_TYPE}. The filter is applied
              * to display names as well as phone numbers. The filter argument should be passed
              * as an additional path segment after this URI.
              *
-             * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field no longer
-             * sorts results based on contacts frequency. For more information, see the
+             * <p class="caution"><b>Caution: </b>This field deosn't sort results based on contacts
+             * frequency. For more information, see the
              * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
              * page.
              */
@@ -6139,12 +6095,13 @@ public final class ContactsContract {
                     "filter");
 
             /**
-             * It supports the similar semantics as {@link #CONTENT_FILTER_URI} and returns the
+             * <p>It supports the similar semantics as {@link #CONTENT_FILTER_URI} and returns the
              * same columns. This URI requires {@link ContactsContract#DIRECTORY_PARAM_KEY} in
              * parameters, otherwise it will throw IllegalArgumentException.
              *
-             * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field no longer sorts
-             * results based on contacts frequency. For more information, see the
+             * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store,
+             * this field doesn't sort results based on contacts frequency. For more information,
+             * see the
              * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
              * page.
              */
@@ -6216,6 +6173,7 @@ public final class ContactsContract {
              * @hide
              */
             @Deprecated
+            @UnsupportedAppUsage
             public static final CharSequence getDisplayLabel(Context context, int type,
                     CharSequence label) {
                 return getTypeLabel(context.getResources(), type, label);
@@ -6404,14 +6362,15 @@ public final class ContactsContract {
                     Uri.withAppendedPath(CONTENT_URI, "lookup_enterprise");
 
             /**
-             * The content:// style URL for email lookup using a filter. The filter returns
+             * <p>The content:// style URL for email lookup using a filter. The filter returns
              * records of MIME type {@link #CONTENT_ITEM_TYPE}. The filter is applied
              * to display names as well as email addresses. The filter argument should be passed
              * as an additional path segment after this URI.
              * </p>
              *
-             * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field no longer sorts
-             * results based on contacts frequency. For more information, see the
+             * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store,
+             * this field doesn't sort results based on contacts frequency. For more information,
+             * see the
              * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
              * page.</p>
              *
@@ -6429,12 +6388,13 @@ public final class ContactsContract {
                     "filter");
 
             /**
-             * It supports the similar semantics as {@link #CONTENT_FILTER_URI} and returns the
+             * <p>It supports the similar semantics as {@link #CONTENT_FILTER_URI} and returns the
              * same columns. This URI requires {@link ContactsContract#DIRECTORY_PARAM_KEY} in
              * parameters, otherwise it will throw IllegalArgumentException.
              *
-             * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field no longer
-             * sorts results based on contacts frequency. For more information, see the
+             * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store,
+             * this field doesn't sort results based on contacts frequency. For more information,
+             * see the
              * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
              * page.
              */
@@ -7649,11 +7609,11 @@ public final class ContactsContract {
             public static final Uri CONTENT_URI = Uri.withAppendedPath(Data.CONTENT_URI,
                     "callables");
             /**
-             * Similar to {@link Phone#CONTENT_FILTER_URI}, but allows users to filter callable
+             * <p>Similar to {@link Phone#CONTENT_FILTER_URI}, but allows users to filter callable
              * data.
              *
-             * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field no longer
-             * sorts results based on contacts frequency. For more information, see the
+             * <p class="caution"><b>Caution: </b>This field no longer sorts results based on
+             * contacts frequency. For more information, see the
              * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
              * page.
              */
@@ -7661,12 +7621,13 @@ public final class ContactsContract {
                     "filter");
 
             /**
-             * Similar to {@link Phone#ENTERPRISE_CONTENT_FILTER_URI}, but allows users to filter
+             * <p>Similar to {@link Phone#ENTERPRISE_CONTENT_FILTER_URI}, but allows users to filter
              * callable data. This URI requires {@link ContactsContract#DIRECTORY_PARAM_KEY} in
              * parameters, otherwise it will throw IllegalArgumentException.
              *
-             * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field no longer
-             * sorts results based on contacts frequency. For more information, see the
+             * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store,
+             * this field doesn't sort results based on contacts frequency. For more information,
+             * see the
              * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
              * page.</p>
              */
@@ -7693,11 +7654,12 @@ public final class ContactsContract {
                     "contactables");
 
             /**
-             * The content:// style URI for these data items, which allows for a query parameter
+             * <p>The content:// style URI for these data items, which allows for a query parameter
              * to be appended onto the end to filter for data items matching the query.
              *
-             * <p class="caution"><b>Caution: </b>As of January 7, 2019, this field no longer
-             * sorts results based on contacts frequency. For more information, see the
+             * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store,
+             * this field doesn't sort results based on contacts frequency. For more information,
+             * see the
              * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
              * page.
              */
@@ -8348,15 +8310,15 @@ public final class ContactsContract {
     }
 
     /**
+     * <p>
      * API allowing applications to send usage information for each {@link Data} row to the
      * Contacts Provider.  Applications can also clear all usage information.
-     *
-     * <p class="caution"><b>Caution: </b>As of January 7, 2019, this class is obsolete. For
-     * more information, see the
-     * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
-     * page.
      * </p>
-     *
+     * <p class="caution"><b>Caution: </b>If you publish your app to the Google Play Store,
+     * this field is obsolete, regardless of Android version. For more information, see the
+     * <a href="/guide/topics/providers/contacts-provider#ObsoleteData">Contacts Provider</a>
+     * page.</p>
+     * <p>
      * With the feedback, Contacts Provider may return more contextually appropriate results for
      * Data listing, typically supplied with
      * {@link ContactsContract.Contacts#CONTENT_FILTER_URI},
@@ -8405,7 +8367,12 @@ public final class ContactsContract {
      * boolean successful = resolver.delete(DataUsageFeedback.DELETE_USAGE_URI, null, null) > 0;
      * </pre>
      * </p>
+     *
+     * @deprecated Contacts affinity information is no longer supported as of
+     * Android version {@link android.os.Build.VERSION_CODES#Q}.
+     * Both update and delete calls are always ignored.
      */
+    @Deprecated
     public static final class DataUsageFeedback {
 
         /**
@@ -8489,6 +8456,7 @@ public final class ContactsContract {
          * nothing will be done.
          * @hide
          */
+        @TestApi
         public static final String UNDEMOTE_METHOD = "undemote";
 
         /**
@@ -8622,6 +8590,7 @@ public final class ContactsContract {
          * Constructs the QuickContacts intent.
          * @hide
          */
+        @UnsupportedAppUsage
         public static Intent composeQuickContactsIntent(Context context, Rect target,
                 Uri lookupUri, int mode, String[] excludeMimes) {
             // When launching from an Activiy, we don't want to start a new task, but otherwise
@@ -9025,10 +8994,6 @@ public final class ContactsContract {
          * +<phone>", etc. If you must show the prefix text in the Contacts App, please use a
          * different DATA# column, and update your contacts.xml to point to this new column. </em>
          * </li>
-         * <li>Everytime the user sends a message to a contact, your app may choose to update the
-         * {@link ContactOptionsColumns#TIMES_CONTACTED} entry through DataUsageFeedback class.
-         * Doing this will allow Voice Assistant to bias speech recognition to contacts frequently
-         * contacted, this is particularly useful for contact names that are hard to pronounce.</li>
          * </ul>
          * If the app chooses not to integrate with the Contacts Provider (in particular, when
          * either METADATA_ACCOUNT_TYPE or METADATA_MIMETYPE field is missing), Voice Assistant

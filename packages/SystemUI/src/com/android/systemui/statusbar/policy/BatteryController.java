@@ -16,6 +16,8 @@
 
 package com.android.systemui.statusbar.policy;
 
+import android.annotation.Nullable;
+
 import com.android.systemui.DemoMode;
 import com.android.systemui.Dumpable;
 import com.android.systemui.statusbar.policy.BatteryController.BatteryStateChangeCallback;
@@ -43,16 +45,39 @@ public interface BatteryController extends DemoMode, Dumpable,
     /**
      * Returns {@code true} if AOD was disabled by power saving policies.
      */
-    default boolean isAodPowerSave() {
-        return isPowerSave();
+    boolean isAodPowerSave();
+
+    /**
+     * A listener that will be notified whenever a change in battery level or power save mode has
+     * occurred.
+     */
+    interface BatteryStateChangeCallback {
+
+        default void onBatteryLevelChanged(int level, boolean pluggedIn, boolean charging) {
+        }
+
+        default void onPowerSaveChanged(boolean isPowerSave) {
+        }
     }
 
     /**
-     * A listener that will be notified whenever a change in battery level or power save mode
-     * has occurred.
+     * If available, get the estimated battery time remaining as a string.
+     *
+     * @param completion A lambda that will be called with the result of fetching the estimate. The
+     * first time this method is called may need to be dispatched to a background thread. The
+     * completion is called on the main thread
      */
-    interface BatteryStateChangeCallback {
-        default void onBatteryLevelChanged(int level, boolean pluggedIn, boolean charging) {}
-        default void onPowerSaveChanged(boolean isPowerSave) {}
+    default void getEstimatedTimeRemainingString(EstimateFetchCompletion completion) {}
+
+    /**
+     * Callback called when the estimated time remaining text is fetched.
+     */
+    public interface EstimateFetchCompletion {
+
+        /**
+         * The callback
+         * @param estimate the estimate
+         */
+        void onBatteryRemainingEstimateRetrieved(@Nullable String estimate);
     }
 }

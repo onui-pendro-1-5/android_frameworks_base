@@ -1,4 +1,5 @@
 <resources>
+<<<<<<< HEAD
     <!-- Older rotation sensors are not setting event.timestamp correctly. Setting to
          true will use SystemClock.elapsedRealtimeNanos() to set timestamp. -->
     <bool name="config_useSystemClockforRotationSensor">false</bool>
@@ -19,6 +20,8 @@
     <string-array name="config_vendorPlatformSignatures">
     </string-array>
 
+=======
+>>>>>>> 47377cc2aba5c9454428e490444dea7d61a06133
     <!-- Paths to the libraries that contain device specific key handlers -->
     <string-array name="config_deviceKeyHandlerLibs" translatable="false">
     </string-array>
@@ -27,6 +30,7 @@
     <string-array name="config_deviceKeyHandlerClasses" translatable="false">
     </string-array>
 
+<<<<<<< HEAD
     <!-- Whether device ignores the RSSNR signal implementation -->
     <bool name="config_ignoreRssnrSignalLevel">false</bool>
 
@@ -46,10 +50,13 @@
     <!-- Is the battery LED intrusive? Used to decide if there should be a disable option -->
     <bool name="config_intrusiveBatteryLed">@bool/config_intrusiveNotificationLed</bool>
 
+=======
+>>>>>>> 47377cc2aba5c9454428e490444dea7d61a06133
     <!-- Button backlight -->
     <integer name="config_buttonBrightnessSettingDefault">255</integer>
     <bool name="config_deviceHasVariableButtonBrightness">false</bool>
 
+<<<<<<< HEAD
     <!-- Hardware keys present on the device, stored as a bit field.
          This integer should equal the sum of the corresponding value for each
          of the following keys present:
@@ -216,10 +223,28 @@
     <!-- Default end time for Ambient Play quiet period
          Represented as milliseconds from midnight (e.g. 21600000 == 6am). -->
     <integer name="config_defaultAmbientPlayQuitPeriodEndTime">21600000</integer>
+=======
+    <!-- Default value for proximity check on screen wake
+         NOTE ! - Enable for devices that have a fast response proximity sensor (ideally < 300ms)
+    -->
+    <bool name="config_proximityCheckOnWake">false</bool>
+    <integer name="config_proximityCheckTimeout">250</integer>
+    <bool name="config_proximityCheckOnWakeEnabledByDefault">false</bool>
+
+    <!-- Whether device has a physical display cutout -->
+    <bool name="config_physicalDisplayCutout">false</bool>
+
+    <!-- Whether device has a big physical display cutout -->
+    <bool name="config_bigPhysicalDisplayCutout">false</bool>
+
+    <!-- Shows the required view for in-display fingerprint -->
+    <bool name="config_supportsInDisplayFingerprint">false</bool>
+>>>>>>> 47377cc2aba5c9454428e490444dea7d61a06133
 
     <!-- Whether to allow process with media UID to access CameraServiceProxy -->
     <bool name="config_allowMediaUidForCameraServiceProxy">false</bool>
 
+<<<<<<< HEAD
     <!-- Whether to show battery percentage inside icon -->
     <bool name="config_battery_percentage_show_inside_icon">false</bool>
 
@@ -286,4 +311,52 @@
     <!-- Whether device has oled display -->
     <bool name="config_hasOledDisplay">false</bool>
 
+=======
+   <!-- Older rotation sensors are not setting event.timestamp correctly. Setting to
+         true will use SystemClock.elapsedRealtimeNanos() to set timestamp. -->
+    <bool name="config_useSystemClockforRotationSensor">false</bool>
+
+    <!-- Whether device ignores the RSSNR signal implementation -->
+    <bool name="config_ignoreRssnrSignalLevel">false</bool>
+
+    <!-- Whether to cleanup fingerprints upon connection to the daemon and when user switches -->
+    <bool name="config_cleanupUnusedFingerprints">true</bool>
+
+    <!-- Whether to use scaled brightness (set -1 to disable) -->
+    <integer name="config_useScaleBrightness">-1</integer>
+
+    <!-- Whether notify fingerprint client of successful cancelled authentication -->
+    <bool name="config_notifyClientOnFingerprintCancelSuccess">false</bool>
+
+    <!-- Is the battery LED intrusive? Used to decide if there should be a disable option -->
+    <bool name="config_intrusiveBatteryLed">true</bool>
+
+    <!-- Whether to send camera status intent -->
+    <bool name="config_sendCameraStatusIntent">false</bool>
+
+    <!-- The list of components which should be automatically disabled for a specific device.
+         Note: this MUST not be used to randomly disable components, ask for approval first! -->
+    <string-array name="config_deviceDisabledComponents" translatable="false">
+    </string-array>
+
+    <!-- The list of components which should be automatically disabled for all devices. -->
+    <string-array name="config_globallyDisabledComponents" translatable="false">
+    </string-array>
+
+    <!-- The list of components which should be forced to be enabled. -->
+    <string-array name="config_forceEnabledComponents" translatable="false">
+    </string-array>
+
+    <!-- Whether to post reset runnable for all clients. Needed for some older
+         vendor fingerprint HAL implementations. -->
+    <bool name="config_fingerprintPostResetRunnableForAllClients">false</bool>
+
+    <!-- pdp data retry for cause 29, 33 and 55-->
+    <bool name="config_pdp_retry_for_29_33_55_enabled">false</bool>
+
+    <!-- OnePlus uses a proprietary vibrator hal to utilize the new powerful motor since the
+         OnePlus 7 Pro. This HAL expects a different format for the data instead of the usual (ms)
+         timing(the duration which the vibrator is expected to vibrate for). -->
+    <bool name="config_hasOnePlusHapticMotor">false</bool>
+>>>>>>> 47377cc2aba5c9454428e490444dea7d61a06133
 </resources>
